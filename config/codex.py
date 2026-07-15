@@ -71,7 +71,7 @@ CODEX_AUTH_URL_SOURCE: str = "cpa"
 # 实际请求会取 origin，调用：
 #   GET  /v0/management/codex-auth-url
 #   POST /v0/management/oauth-callback
-CPA_MANAGEMENT_URL: str = "http://43.167.188.22:8317/management.html"#/oauth"
+CPA_MANAGEMENT_URL: str = "http://127.0.0.1:8317/management.html"#/oauth"
 
 # CPA 管理密钥，同时作为 Authorization: Bearer 和 X-Management-Key
 CPA_MANAGEMENT_KEY: str = env_str("CPA_MANAGEMENT_KEY", "")
