@@ -20,14 +20,18 @@ Outlook 邮箱客户端（mail.chatai.codes 双协议）
 不直连 Microsoft Graph，因为后者要 access_token + 复杂 OAuth 协议。
 """
 import base64
+import email as email_lib
 import hashlib
 import hmac as hmac_mod
+import imaplib
 import json
 import logging
 import os
 import threading
 import time
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from email.header import decode_header
 from urllib.parse import urlencode
 from pathlib import Path
 
@@ -360,19 +364,109 @@ def _token_looks_jwt(token: str) -> bool:
     return str(token or "").count(".") >= 2
 
 
-def _ms_access_token(account: OutlookAccount, http: CurlSession | None = None) -> tuple[str, str]:
+def _decode_email_header(header_value: str | None) -> str:
+    if not header_value:
+        return ""
+    out = []
+    for part, charset in decode_header(header_value):
+        if isinstance(part, bytes):
+            try:
+                out.append(part.decode(charset or "utf-8", errors="replace"))
+            except Exception:
+                out.append(part.decode("utf-8", errors="replace"))
+        else:
+            out.append(str(part))
+    return " ".join(out)
+
+
+def _get_msg_text(msg) -> str:
+    if msg.is_multipart():
+        text_parts = []
+        html_part = ""
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            cdisp = str(part.get("Content-Disposition", ""))
+            if "attachment" in cdisp:
+                continue
+            try:
+                payload = part.get_payload(decode=True)
+                if not payload:
+                    continue
+                charset = part.get_content_charset() or "utf-8"
+                text = payload.decode(charset, errors="replace")
+            except Exception:
+                continue
+            if ctype == "text/plain":
+                text_parts.append(text)
+            elif ctype == "text/html" and not html_part:
+                html_part = text
+        return "\n".join(text_parts) if text_parts else html_part
+
+    try:
+        payload = msg.get_payload(decode=True)
+        if payload:
+            charset = msg.get_content_charset() or "utf-8"
+            return payload.decode(charset, errors="replace")
+    except Exception:
+        pass
+    return str(msg.get_payload() or "")
+
+
+def _imap_msg_to_dict(msg) -> dict:
+    subject = _decode_email_header(msg.get("Subject") or msg.get("subject") or "")
+    from_ = _decode_email_header(msg.get("From") or msg.get("from") or "")
+    to_ = _decode_email_header(msg.get("To") or msg.get("to") or "")
+    body = _get_msg_text(msg)
+    date_raw = msg.get("Date") or msg.get("date") or ""
+    ts_str = ""
+    if date_raw:
+        try:
+            from email.utils import parsedate_to_datetime
+            dt = parsedate_to_datetime(date_raw)
+            if dt.tzinfo is None:
+                dt = dt.replace(tzinfo=timezone.utc)
+            ts_str = dt.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        except Exception:
+            ts_str = str(date_raw)
+    return {
+        "id": msg.get("Message-ID") or msg.get("Message-Id") or "",
+        "subject": subject,
+        "from": from_,
+        "to": to_,
+        "fromEmail": from_,
+        "fromName": from_,
+        "sendEmail": from_,
+        "receivedDateTime": ts_str,
+        "date": ts_str,
+        "bodyPreview": body,
+        "content": body,
+        "body": body,
+        "html": body,
+        "text": body,
+    }
+
+
+def _ms_access_token(
+    account: OutlookAccount,
+    http: CurlSession | None = None,
+    preferred_kind: str | None = None,
+) -> tuple[str, str]:
     """用 refresh_token 换取可读邮件的 access_token。
 
     返回 (token, kind)：
-      - kind="graph"：JWT，可访问 graph.microsoft.com
+      - kind="graph"：可访问 graph.microsoft.com（个人 Outlook 账号有时返回 opaque token，不一定是 JWT）
       - kind="outlook"：Outlook REST token，可访问 outlook.office.com/api/v2.0
     """
+    preferred_kind = str(preferred_kind or "").strip().lower() or None
+    if preferred_kind not in (None, "graph", "outlook"):
+        preferred_kind = None
     cache_key = f"{account.email}|{account.client_id}|{account.refresh_token[:24]}"
     cached = _MS_TOKEN_CACHE.get(cache_key)
     now = time.time()
     if cached and cached[1] - now > 120:
         token_kind, token = cached[0].split(":", 1) if ":" in cached[0] else ("graph", cached[0])
-        return token, token_kind
+        if preferred_kind is None or token_kind == preferred_kind:
+            return token, token_kind
 
     own_http = http is None
     http = http or _ms_http()
@@ -419,6 +513,8 @@ def _ms_access_token(account: OutlookAccount, http: CurlSession | None = None) -
                 },
             ),
         ]
+        if preferred_kind:
+            attempts = [item for item in attempts if item[0] == preferred_kind]
         last_text = ""
         for kind, url, payload in attempts:
             resp = http.post(
@@ -436,10 +532,8 @@ def _ms_access_token(account: OutlookAccount, http: CurlSession | None = None) -
             if resp.status_code == 200 and isinstance(data, dict) and data.get("access_token"):
                 expires_in = int(data.get("expires_in") or 3600)
                 token = str(data["access_token"])
-                # Graph 必须是 JWT；不是 JWT 就不能打 graph.microsoft.com。
-                if kind == "graph" and not _token_looks_jwt(token):
-                    logger.debug("[Outlook] 换到的 Graph token 不是 JWT，继续尝试 Outlook REST token")
-                    continue
+                # Microsoft Graph 对个人 Outlook/MSA 账号可能返回 opaque access_token，
+                # 不一定是 JWT；Graph 仍然接受。不能用是否包含 "." 判断是否可用。
                 _MS_TOKEN_CACHE[cache_key] = (f"{kind}:{token}", now + max(300, expires_in - 60))
                 logger.debug("[Outlook] Microsoft token 获取成功 kind=%s jwt=%s", kind, _token_looks_jwt(token))
                 return token, kind
@@ -560,6 +654,54 @@ def _fetch_outlook_rest_messages(http: CurlSession, token: str) -> list[dict]:
     return out
 
 
+def _fetch_imap_direct_messages(account: OutlookAccount) -> list[dict]:
+    """本地 IMAP XOAUTH2 读取 Outlook Inbox 最新邮件。"""
+    http = _ms_http()
+    mail: imaplib.IMAP4_SSL | None = None
+    try:
+        token, _kind = _ms_access_token(account, http=http, preferred_kind="outlook")
+        auth_string = f"user={account.email}\x01auth=Bearer {token}\x01\x01"
+        mail = imaplib.IMAP4_SSL("outlook.office365.com", 993)
+        mail.authenticate("XOAUTH2", lambda _challenge: auth_string.encode("utf-8"))
+        status, _data = mail.select("INBOX")
+        if status != "OK":
+            raise OutlookClientError(f"IMAP select INBOX 失败: {status}")
+
+        status, msg_ids = mail.search(None, "ALL")
+        if status != "OK":
+            raise OutlookClientError(f"IMAP search 失败: {status}")
+        ids = msg_ids[0].split() if msg_ids and msg_ids[0] else []
+        if not ids:
+            logger.debug("[Outlook] 本地 IMAP 收件箱为空")
+            return []
+
+        out = []
+        for mid in ids[-20:]:
+            status, data = mail.fetch(mid, "(RFC822)")
+            if status != "OK" or not data:
+                continue
+            try:
+                raw = data[0][1]
+                if not isinstance(raw, (bytes, bytearray)):
+                    continue
+                msg = email_lib.message_from_bytes(raw)
+                out.append(_imap_msg_to_dict(msg))
+            except Exception as exc:
+                logger.debug("[Outlook] 本地 IMAP 解析邮件失败 mid=%s: %s", mid, exc)
+        logger.debug("[Outlook] 本地 IMAP 直连拿到 %s 封邮件", len(out))
+        return out
+    except Exception as exc:
+        logger.warning("[Outlook] 本地 IMAP 直连失败: %s: %s", type(exc).__name__, exc)
+        return []
+    finally:
+        try:
+            if mail is not None:
+                mail.logout()
+        except Exception:
+            pass
+        http.close()
+
+
 def _fetch_via_graph_direct(account: OutlookAccount) -> list[dict]:
     """直连 Microsoft API 读取 Inbox 最新邮件；Graph 不兼容时自动 Outlook REST。"""
     http = _ms_http()
@@ -572,9 +714,11 @@ def _fetch_via_graph_direct(account: OutlookAccount) -> list[dict]:
                 return out
             except Exception as exc:
                 logger.warning(f"[Outlook] Microsoft Graph 读取失败，尝试 Outlook REST: {type(exc).__name__}: {exc}")
-                # 重新取 Outlook REST token
+                # 重新取 Outlook REST token。注意不能继续复用 Graph token；
+                # Graph token 的 audience 是 graph.microsoft.com，拿去请求
+                # outlook.office.com/api/v2.0 会返回 401。
                 _MS_TOKEN_CACHE.pop(f"{account.email}|{account.client_id}|{account.refresh_token[:24]}", None)
-                token, kind = _ms_access_token(account, http=http)
+                token, kind = _ms_access_token(account, http=http, preferred_kind="outlook")
         out = _fetch_outlook_rest_messages(http, token)
         logger.debug(f"[Outlook] Outlook REST 直连拿到 {len(out)} 封邮件")
         return out
@@ -599,11 +743,15 @@ def _fetch_via(session: CurlSession, protocol: str, account: OutlookAccount) -> 
     if mode in ("direct", "graph", "graph_direct", "msgraph"):
         if protocol == "graph":
             return _fetch_via_graph_direct(account)
+        if protocol == "imap":
+            return _fetch_imap_direct_messages(account)
         return []
 
     if mode == "auto" and _REMOTE_DISABLED:
         if protocol == "graph":
             return _fetch_via_graph_direct(account)
+        if protocol == "imap":
+            return _fetch_imap_direct_messages(account)
         return []
 
     url = f"{OUTLOOK_API_BASE.rstrip('/')}/api/fetch-{protocol}"
@@ -702,7 +850,7 @@ def fetch_latest_otp(
     session = _http_session()
 
     logger.info(
-        f"[Outlook] 开始轮询 {email} 的收件箱（mode={_outlook_fetch_mode()}, graph + imap/Graph直连兜底），"
+        f"[Outlook] 开始轮询 {email} 的收件箱（mode={_outlook_fetch_mode()}, Graph + IMAP 本地直连，REST 兜底），"
         f"最长 {max_wait or _email_cfg.OTP_MAX_WAIT}s, settle={settle}s..."
     )
 

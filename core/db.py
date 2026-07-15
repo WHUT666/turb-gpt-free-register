@@ -919,7 +919,7 @@ def claim_next_outlook() -> dict | None:
 
 
 def release_outlook(email: str, status: str = "available", note: str | None = None) -> None:
-    """把账号状态改回 available，或标记为 failed。"""
+    """把账号状态改回 available，或标记为 used/failed/disabled。"""
     with _LOCK:
         rows = _load_outlook()
         row = _find_by_email(rows, email)
@@ -928,6 +928,8 @@ def release_outlook(email: str, status: str = "available", note: str | None = No
         row["status"] = status
         if status == "available":
             row["used_at"] = None
+        elif status in ("used", "failed", "disabled"):
+            row["used_at"] = row.get("used_at") or _now()
         if note is not None:
             row["note"] = note
         _save_outlook(rows)
@@ -1036,7 +1038,7 @@ def release_generic_api_email(email: str, status: str = "available", note: str |
         row["status"] = status
         if status == "available":
             row["used_at"] = None
-        elif status in ("used", "failed"):
+        elif status in ("used", "failed", "disabled"):
             row["used_at"] = row.get("used_at") or _now()
         if note is not None:
             row["note"] = note
@@ -1539,7 +1541,7 @@ def release_domain_email(email: str, status: str = "available", note: str | None
         row["status"] = status
         if status == "available":
             row["used_at"] = None
-        elif status in ("used", "failed"):
+        elif status in ("used", "failed", "disabled"):
             row["used_at"] = row.get("used_at") or _now()
         if note is not None:
             row["note"] = note

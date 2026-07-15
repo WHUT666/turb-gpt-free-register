@@ -132,7 +132,7 @@
     .muted { color: var(--muted); }
     .pill { display: inline-flex; min-width: 48px; justify-content: center; padding: 3px 8px; border-radius: 999px; font-size: 12px; font-weight: 700; }
     .status-available, .status-pending { color: var(--blue); background: #eef4ff; }
-    .status-used, .status-cancelled, .status-stopped { color: #475467; background: #f2f4f7; }
+    .status-used, .status-cancelled, .status-stopped, .status-disabled { color: #475467; background: #f2f4f7; }
     .status-stopping { color: var(--amber); background: #fff7e6; }
     .status-failed { color: var(--red); background: #fff0ef; }
     .status-running { color: var(--amber); background: #fff7e6; }
@@ -456,6 +456,8 @@
         <div class="buttons">
           <span class="muted" id="outlookSelectedHint" style="font-size:12px;align-self:center;margin-right:4px;">已选 0</span>
           <button class="btn good" id="btnMarkSelectedOutlookAvailable" disabled title="把选中的邮箱批量标记为未使用/可用">标记未使用</button>
+          <button class="btn" id="btnDisableSelectedOutlook" disabled title="批量停用选中的邮箱；停用后不会被注册任务领取">停用选中</button>
+          <button class="btn" id="btnFailSelectedOutlook" disabled title="批量标记选中的邮箱为失败">标失败</button>
           <button class="btn" id="btnDeleteSelectedOutlook" disabled title="批量删除选中的邮箱素材">删除选中</button>
           <button class="btn" id="copyAllEmails">复制全部邮箱素材</button>
         </div>
@@ -555,7 +557,7 @@ function short(v, n=40) { const s = v || ''; return s.length > n ? s.slice(0,n)+
 function copyId(v) { if (!v) return ''; const id = 'c'+(++copySeq); copyStore.set(id, v); return id; }
 function cbtn(label, value, cls='') { const id = copyId(value); return `<button class="${cls}" data-copy-id="${id}" ${id?'':'disabled'}>${label}</button>`; }
 function pill(status) {
-  const map = { available:'可用', used:'已用', failed:'失败', pending:'排队', running:'运行中', stopping:'停止中', stopped:'已停止', success:'成功', cancelled:'已取消' };
+  const map = { available:'可用', used:'已用', failed:'失败', disabled:'已停用', pending:'排队', running:'运行中', stopping:'停止中', stopped:'已停止', success:'成功', cancelled:'已取消' };
   return `<span class="pill status-${esc(status)}">${esc(map[status]||status||'-')}</span>`;
 }
 function showToast(t) { const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(showToast.t); showToast.t=setTimeout(()=>el.classList.remove('show'),1400); }
@@ -1164,9 +1166,15 @@ function renderOutlook() {
       <td class="muted">${esc(r.used_at || '-')}</td>
       <td class="actions">
         ${cbtn('复制邮箱', r.copy_line)} ${cbtn('复制Token', r.access_token, 'primary')} ${cbtn('复制整行', r.account_copy_line, 'good')}
-        ${r.status === 'failed'
+        ${r.status !== 'available'
           ? `<button data-pool-act="available" data-email="${esc(r.email)}" data-source="${esc(r.source || 'outlook')}">恢复可用</button>`
-          : `<button data-pool-act="failed" data-email="${esc(r.email)}" data-source="${esc(r.source || 'outlook')}">标失败</button>`}
+          : ''}
+        ${r.status !== 'disabled'
+          ? `<button data-pool-act="disabled" data-email="${esc(r.email)}" data-source="${esc(r.source || 'outlook')}">停用</button>`
+          : ''}
+        ${r.status !== 'failed'
+          ? `<button data-pool-act="failed" data-email="${esc(r.email)}" data-source="${esc(r.source || 'outlook')}">标失败</button>`
+          : ''}
         <button data-pool-act="delete" data-email="${esc(r.email)}" data-source="${esc(r.source || 'outlook')}" style="border-color:#e7a3a0;color:#b3261e;">删除</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="7" class="muted">邮箱池为空</td></tr>';
@@ -1177,9 +1185,13 @@ function updateOutlookSelectionUi(pageRows = null) {
   const hint = $('#outlookSelectedHint');
   const bulkBtn = $('#btnDeleteSelectedOutlook');
   const markAvailBtn = $('#btnMarkSelectedOutlookAvailable');
+  const disableBtn = $('#btnDisableSelectedOutlook');
+  const failBtn = $('#btnFailSelectedOutlook');
   if (hint) hint.textContent = `已选 ${OUTLOOK_SELECTED.size}`;
   if (bulkBtn) bulkBtn.disabled = OUTLOOK_SELECTED.size === 0;
   if (markAvailBtn) markAvailBtn.disabled = OUTLOOK_SELECTED.size === 0;
+  if (disableBtn) disableBtn.disabled = OUTLOOK_SELECTED.size === 0;
+  if (failBtn) failBtn.disabled = OUTLOOK_SELECTED.size === 0;
 
   const cbAll = $('#outlookSelectAll');
   if (!cbAll) return;
@@ -1220,6 +1232,8 @@ $('#outlookSelectAll').addEventListener('change', (e) => {
 });
 $('#btnDeleteSelectedOutlook').addEventListener('click', deleteSelectedOutlook);
 $('#btnMarkSelectedOutlookAvailable').addEventListener('click', () => bulkMarkOutlookStatus('available'));
+$('#btnDisableSelectedOutlook').addEventListener('click', () => bulkMarkOutlookStatus('disabled'));
+$('#btnFailSelectedOutlook').addEventListener('click', () => bulkMarkOutlookStatus('failed'));
 $('#outlookBody').addEventListener('click', async (e) => {
   const t = e.target.closest('[data-pool-act]');
   if (!t) return;
@@ -1232,8 +1246,9 @@ $('#outlookBody').addEventListener('click', async (e) => {
       OUTLOOK_SELECTED.delete(`${source}|${email}`);
       showToast('已删除');
     } else {
-      await api('/api/outlook/status', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, status: poolAct, source, note: poolAct==='failed'?'手动标记失败':'手动恢复可用'}) });
-      showToast(poolAct === 'failed' ? '已标失败' : '已恢复可用');
+      const noteMap = {failed:'手动标记失败', available:'手动恢复可用', disabled:'手动停用'};
+      await api('/api/outlook/status', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email, status: poolAct, source, note: noteMap[poolAct] || '手动修改状态'}) });
+      showToast(poolAct === 'failed' ? '已标失败' : poolAct === 'disabled' ? '已停用' : '已恢复可用');
     }
     loadOutlook(); loadSummary();
   } catch(err) { showToast('操作失败: ' + err.message); }
@@ -1255,15 +1270,16 @@ async function bulkMarkOutlookStatus(status) {
     return {source, email: rest.join('|')};
   });
   if (items.length === 0) { showToast('请先选择邮箱'); return; }
-  const label = status === 'available' ? '未使用/可用' : status;
+  const labelMap = {available:'未使用/可用', disabled:'停用', failed:'失败'};
+  const label = labelMap[status] || status;
   if (!confirm(`确定把选中的 ${items.length} 个邮箱标记为${label}吗？`)) return;
-  const btn = $('#btnMarkSelectedOutlookAvailable');
+  const btn = status === 'disabled' ? $('#btnDisableSelectedOutlook') : status === 'failed' ? $('#btnFailSelectedOutlook') : $('#btnMarkSelectedOutlookAvailable');
   if (btn) btn.disabled = true;
   try {
     const r = await api('/api/outlook/status-bulk', {
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({items, status, source: $('#poolSource').value, note: '批量标记未使用'}),
+      body: JSON.stringify({items, status, source: $('#poolSource').value, note: `批量标记${label}`}),
     });
     OUTLOOK_SELECTED.clear();
     const skippedCount = (r.skipped || []).length;

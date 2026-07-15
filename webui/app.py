@@ -223,13 +223,15 @@ def create_app() -> Flask:
 
     @app.post("/api/outlook/status")
     def api_outlook_status():
-        """手动改邮箱状态：body {email, status, note?}。status ∈ available/used/failed。"""
+        """手动改邮箱状态：body {email, status, note?, source?}。status ∈ available/used/failed/disabled。"""
         data = request.get_json(silent=True) or {}
         email = (data.get("email") or "").strip()
         status = (data.get("status") or "").strip()
-        if not email or status not in ("available", "used", "failed"):
+        if not email or status not in ("available", "used", "failed", "disabled"):
             return jsonify({"ok": False, "error": "email 或 status 非法"}), 400
-        source = _pool_source_arg()
+        source = (data.get("source") or _pool_source_arg()).strip()
+        if source == "all":
+            source = "outlook"
         if source == "generic_api":
             db.release_generic_api_email(email, status=status, note=data.get("note"))
         elif source == "cloudflare_domain":
@@ -245,8 +247,8 @@ def create_app() -> Flask:
         items = data.get("items") or data.get("emails") or []
         status = (data.get("status") or "").strip()
         note = data.get("note")
-        default_source = _pool_source_arg()
-        if status not in ("available", "used", "failed"):
+        default_source = (data.get("source") or _pool_source_arg()).strip()
+        if status not in ("available", "used", "failed", "disabled"):
             return jsonify({"ok": False, "error": "status 非法"}), 400
         if not isinstance(items, list) or not items:
             return jsonify({"ok": False, "error": "items/emails 必须是非空数组"}), 400
@@ -296,7 +298,9 @@ def create_app() -> Flask:
         email = (data.get("email") or "").strip()
         if not email:
             return jsonify({"ok": False, "error": "email 为空"}), 400
-        source = _pool_source_arg()
+        source = (data.get("source") or _pool_source_arg()).strip()
+        if source == "all":
+            source = "outlook"
         deleted = (
             db.delete_generic_api_email(email)
             if source == "generic_api"
