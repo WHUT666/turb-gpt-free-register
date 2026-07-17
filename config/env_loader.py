@@ -18,6 +18,8 @@ _LOADED = False
 
 # 统一管理：env key -> 说明（.env.example 用）
 SECRET_ENV_KEYS: dict[str, str] = {
+    "WEBUI_AUTH_CODE": "WebUI 登录授权码",
+    "WEBUI_SESSION_SECRET": "WebUI Session Cookie 签名密钥",
     "BROWSER_USE_API_KEY": "Browser Use Cloud API Key",
     "ROXY_API_TOKEN": "RoxyBrowser 本地 API Token",
     "QQ_IMAP_PASSWORD": "QQ 邮箱 IMAP 授权码（不是 QQ 密码）",

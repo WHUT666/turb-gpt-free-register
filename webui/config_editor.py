@@ -28,6 +28,17 @@ _CONFIG_DIR = _PROJECT_ROOT / "config"
 # ============================================================
 
 EDITABLE_FIELDS = [
+    # ---- WebUI 授权 ----
+    {
+        "key": "WEBUI_AUTH_CODE", "file": "codex.py", "type": "str", "group": "WebUI 授权",
+        "label": "WebUI 授权码", "help": "保存在 .env（WEBUI_AUTH_CODE）；启动也可传 python web.py --auth-code <code>。保存后重启 WebUI 生效",
+        "storage": "env", "secret": True,
+    },
+    {
+        "key": "WEBUI_SESSION_SECRET", "file": "codex.py", "type": "str", "group": "WebUI 授权",
+        "label": "Session 签名密钥", "help": "可选，保存在 .env（WEBUI_SESSION_SECRET）；不填则每次启动随机生成",
+        "storage": "env", "secret": True,
+    },
     # ---- 功能开关 ----
     {
         "key": "ENABLE_CODEX_AUTO", "file": "codex.py", "type": "bool", "group": "功能开关",

@@ -32,12 +32,13 @@
     header h1 { font-size: 22px; }
     header .meta { margin-top: 4px; color: #b8c7d9; font-size: 12px; }
     .header-links { margin-top: 8px; display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
-    .header-links a {
+    .header-links form { margin: 0; }
+    .header-links a, .header-links button {
       color: #dbeafe; text-decoration: none; font-size: 12px; font-weight: 800;
       border: 1px solid rgba(219,234,254,.28); border-radius: 999px; padding: 4px 10px;
-      background: rgba(37,99,235,.18);
+      background: rgba(37,99,235,.18); cursor: pointer; font: inherit; line-height: 1.4;
     }
-    .header-links a:hover { color: #fff; background: rgba(37,99,235,.36); }
+    .header-links a:hover, .header-links button:hover { color: #fff; background: rgba(37,99,235,.36); }
     .stats { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; }
     .stat {
       min-width: 96px; padding: 8px 12px; border: 1px solid rgba(255,255,255,.16);
@@ -258,7 +259,10 @@
     <div>
       <h1>GPT 注册控制台</h1>
       <p class="meta">本地 Web 控制台 · 数据更新于 <span id="updatedAt">-</span></p>
-      <div class="header-links"><a href="https://t.me/+gu_cvEKq_vcyZWRl" target="_blank" rel="noopener noreferrer">TG 交流群</a></div>
+      <div class="header-links">
+        <a href="https://t.me/+gu_cvEKq_vcyZWRl" target="_blank" rel="noopener noreferrer">TG 交流群</a>
+        <form method="post" action="/logout"><button type="submit">退出</button></form>
+      </div>
     </div>
     <div class="stats">
       <div class="stat"><span>已注册</span><strong id="statAccounts">0</strong></div>

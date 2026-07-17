@@ -16,6 +16,8 @@ from pathlib import Path
 
 from flask import Flask, Response, jsonify, render_template, request
 
+from webui.auth import init_auth, register_auth_routes
+
 from core import db
 from core import registration_service as svc
 from webui import config_editor
@@ -53,8 +55,10 @@ def _codex_retry_log_path(email: str) -> Path:
     return _LOG_DIR / f"codex-retry-{safe}.log"
 
 
-def create_app() -> Flask:
+def create_app(auth_code: str | None = None) -> Flask:
     app = Flask(__name__, template_folder="templates")
+    init_auth(app, auth_code=auth_code)
+    register_auth_routes(app)
 
     # ----------------------------------------------------------
     # 页面
