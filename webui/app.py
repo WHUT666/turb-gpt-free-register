@@ -142,6 +142,109 @@ def create_app() -> Flask:
             "skipped": skipped,
         })
 
+
+    @app.post("/api/accounts/check-plan")
+    def api_account_check_plan():
+        """查询单个账号当前套餐和 Plus 试用资格。Body {account_id|email, proxy?, timezone_offset_min?}"""
+        from core.chatgpt_plan import check_account_plan
+
+        data = request.get_json(silent=True) or {}
+        acc_id = data.get("account_id") or data.get("id")
+        email = (data.get("email") or "").strip()
+        acc = None
+        if acc_id is not None:
+            try:
+                acc = db.get_account(int(acc_id))
+            except Exception:
+                acc = None
+        if acc is None and email:
+            acc = db.get_account_by_email(email)
+        if not acc:
+            return jsonify({"ok": False, "error": "账号不存在"}), 404
+        token = (acc.get("access_token") or "").strip()
+        if not token:
+            return jsonify({"ok": False, "error": "该账号没有 access_token"}), 400
+        result = check_account_plan(
+            token,
+            proxy=data.get("proxy", None),
+            timezone_offset_min=str(data.get("timezone_offset_min") or "-"),
+        )
+        db.update_account_plan_check(acc_id=int(acc.get("id")), result=result)
+        return jsonify({"ok": bool(result.get("ok")), "account_id": acc.get("id"), "email": acc.get("email"), "result": result})
+
+    @app.post("/api/accounts/check-plan-bulk")
+    def api_accounts_check_plan_bulk():
+        """批量查询账号当前套餐和 Plus 试用资格。Body {account_ids:[...], workers?, proxy?, timezone_offset_min?}"""
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        from core.chatgpt_plan import check_account_plan
+
+        data = request.get_json(silent=True) or {}
+        ids = data.get("account_ids") or data.get("ids") or []
+        if not isinstance(ids, list) or not ids:
+            return jsonify({"ok": False, "error": "account_ids 必须是非空数组"}), 400
+        if len(ids) > 500:
+            return jsonify({"ok": False, "error": "单次最多查询 500 个账号"}), 400
+        workers = max(1, min(16, int(data.get("workers") or 3)))
+        proxy = data.get("proxy", None)
+        timezone_offset_min = str(data.get("timezone_offset_min") or "-")
+
+        items = []
+        skipped = []
+        seen = set()
+        for raw in ids:
+            try:
+                acc_id = int(raw)
+            except Exception:
+                skipped.append({"id": raw, "reason": "ID 非法"})
+                continue
+            if acc_id in seen:
+                continue
+            seen.add(acc_id)
+            acc = db.get_account(acc_id)
+            if not acc:
+                skipped.append({"id": acc_id, "reason": "账号不存在"})
+                continue
+            if not (acc.get("access_token") or "").strip():
+                skipped.append({"id": acc_id, "email": acc.get("email"), "reason": "缺少 access_token"})
+                continue
+            items.append(acc)
+
+        def _one(acc: dict) -> dict:
+            result = check_account_plan(
+                acc.get("access_token") or "",
+                proxy=proxy,
+                timezone_offset_min=timezone_offset_min,
+            )
+            db.update_account_plan_check(acc_id=int(acc.get("id")), result=result)
+            return {
+                "id": acc.get("id"),
+                "email": acc.get("email"),
+                "ok": bool(result.get("ok")),
+                "plan": result.get("current_plan_type"),
+                "plus_trial_eligible": bool(result.get("plus_trial_eligible")),
+                "error": result.get("error"),
+            }
+
+        checked = []
+        if items:
+            with ThreadPoolExecutor(max_workers=workers, thread_name_prefix="plan-check") as ex:
+                futures = [ex.submit(_one, acc) for acc in items]
+                for fut in as_completed(futures):
+                    try:
+                        checked.append(fut.result())
+                    except Exception as exc:
+                        checked.append({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
+        ok_count = sum(1 for x in checked if x.get("ok"))
+        return jsonify({
+            "ok": True,
+            "checked": checked,
+            "checked_count": len(checked),
+            "ok_count": ok_count,
+            "failed_count": len(checked) - ok_count,
+            "skipped": skipped,
+            "skipped_count": len(skipped),
+        })
+
     # ----------------------------------------------------------
     # 邮箱池
     # ----------------------------------------------------------

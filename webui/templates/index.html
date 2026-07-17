@@ -121,7 +121,10 @@
     .col-error { width: 320px; }
     .col-actions { width: 220px; }
     .jobs-table .col-actions { width: 230px; }
+    .accounts-table .col-token { width: 92px; }
+    .accounts-table .col-plan { width: 340px; }
     .accounts-table .col-actions { width: 360px; }
+    .accounts-table td:nth-child(6), .accounts-table th:nth-child(6) { overflow: visible; text-overflow: clip; }
     .outlook-table .col-actions { width: 220px; }
     .codex-table .col-actions { width: 260px; }
     th { position: sticky; top: 0; background: #fbfcfe; color: #475467; z-index: 1; font-size: 12px; }
@@ -342,6 +345,7 @@
           <label class="inline-num" title="批量补跑 Codex 的并发线程数">补跑线程
             <input id="codexBulkWorkers" type="number" min="1" max="16" value="3">
           </label>
+          <button class="btn primary" id="btnCheckSelectedPlans" disabled title="查询选中账号当前套餐；free 账号会检查 Plus 试用资格">查询选中套餐</button>
           <button class="btn primary" id="btnRetrySelectedCodex" disabled title="给选中的账号批量补跑 Codex 授权">批量补跑 Codex</button>
           <button class="btn" id="btnDeleteSelectedAccounts" disabled title="删除选中的本地账号/token记录">删除选中</button>
           <button class="btn primary" id="copyAllTokens">复制全部 Token</button>
@@ -350,10 +354,10 @@
       </div>
       <div class="table-wrap">
         <table class="accounts-table">
-          <colgroup><col class="col-check"><col class="col-id"><col class="col-email"><col class="col-source"><col class="col-token"><col class="col-small"><col class="col-status"><col class="col-time"><col class="col-actions"></colgroup>
+          <colgroup><col class="col-check"><col class="col-id"><col class="col-email"><col class="col-source"><col class="col-token"><col class="col-plan"><col class="col-small"><col class="col-status"><col class="col-time"><col class="col-actions"></colgroup>
           <thead><tr>
             <th><input type="checkbox" id="accountsSelectAll" title="全选/取消全选当前页账号"></th>
-            <th>ID</th><th>邮箱</th><th>来源</th><th>Token</th><th>2FA</th><th>Codex</th><th>创建时间</th><th>操作</th>
+            <th>ID</th><th>邮箱</th><th>来源</th><th>Token</th><th>套餐</th><th>2FA</th><th>Codex</th><th>创建时间</th><th>操作</th>
           </tr></thead>
           <tbody id="accountsBody"></tbody>
         </table>
@@ -894,6 +898,74 @@ function _codexCell(r) {
   if (s === 'deactivated') return `<span class="pill status-failed" title="账号已被 OpenAI 删除/停用/封禁，无法授权">已废号</span>`;
   return `<span class="muted">-</span>`;
 }
+function _fmtPlanTime(v, dateOnly = false) {
+  if (!v) return '';
+  try {
+    const d = new Date(v);
+    if (Number.isNaN(d.getTime())) {
+      const raw = String(v).replace('T', ' ').replace(/(\+00:00|Z)$/, '');
+      return dateOnly ? raw.slice(0, 10) : raw;
+    }
+    const pad = n => String(n).padStart(2, '0');
+    const day = `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;
+    return dateOnly ? day : `${day} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  } catch(e) {
+    return String(v);
+  }
+}
+function _billingLabel(v) {
+  const x = (v || '').toString().toLowerCase();
+  if (x === 'monthly') return '月付';
+  if (x === 'yearly' || x === 'annual' || x === 'annually') return '年付';
+  return v || '';
+}
+function _discountLabel(r) {
+  const amount = r.discount_amount;
+  const type = (r.discount_type || '').toString().toLowerCase();
+  if (amount === undefined || amount === null || amount === '') return '';
+  const n = Number(amount);
+  if (type === 'percentage' && !Number.isNaN(n)) { const v = Number.isInteger(n) ? String(n) : String(n); return `${v}%折扣`; }
+  if (!Number.isNaN(n)) return `${n}折扣`;
+  return `${amount}折扣`;
+}
+function _planCell(r) {
+  const ok = r.plan_check_ok;
+  const err = r.plan_check_error || '';
+  const plan = (r.current_plan_type || r.plan_type || '-').toString();
+  const checked = r.plan_checked_at ? `查询: ${esc(r.plan_checked_at)}` : '未查询实时套餐';
+  const title = err ? esc(err) : checked;
+  if (err && ok === false) return `<span class="pill status-failed" title="${title}">查询失败</span>`;
+  const lower = plan.toLowerCase();
+
+  if (lower === 'free') {
+    const text = r.plus_trial_eligible ? 'free(可Plus试用)' : 'free';
+    const cls = r.plus_trial_eligible ? 'status-success' : 'status-used';
+    const t = r.plus_trial_eligible ? `${title}；Plus 试用资格可用` : title;
+    return `<span class="pill ${cls}" title="${t}">${esc(text)}</span>`;
+  }
+
+  const isPaid = lower.includes('plus') || lower.includes('pro') || lower.includes('team') || lower.includes('go');
+  const cls = isPaid ? 'status-success' : 'status-running';
+  const expireRaw = r.plan_expires_at || r.expires_at || r.plan_renews_at || r.renews_at || '';
+  const expire = _fmtPlanTime(expireRaw, true);
+  const parts = [];
+  const billing = _billingLabel(r.billing_period);
+  if (billing) parts.push(billing);
+  if (r.billing_currency) parts.push(r.billing_currency);
+  if (expire) parts.push(`到期 ${expire}`);
+  const discount = _discountLabel(r);
+  if (discount) parts.push(discount);
+  const text = parts.length ? `${plan}（${parts.join('/')}）` : plan;
+  const detail = [title];
+  if (expireRaw) detail.push(`到期时间: ${expireRaw}`);
+  if (r.plan_renews_at) detail.push(`续费时间: ${r.plan_renews_at}`);
+  if (r.discount_expires_at) detail.push(`折扣结束: ${r.discount_expires_at}`);
+  if (r.discount_promo_campaign_id) detail.push(`优惠: ${r.discount_promo_campaign_id}`);
+  return `<span class="pill ${cls}" title="${esc(detail.join('；'))}">${esc(text)}</span>`;
+}
+function _planAction(r) {
+  return `<button data-plan-check="${esc(r.id)}" title="查询当前套餐；free 账号会检查 Plus 试用资格">查套餐</button>`;
+}
 function _codexAction(r) {
   const s = r.codex_status || '';
   if (s === 'retrying') {
@@ -919,12 +991,13 @@ function renderAccounts() {
       <td class="muted">#${esc(r.id)}</td>
       <td><div class="main-cell">${esc(r.email)}</div><div class="sub-cell">${esc(r.user_name || '-')}</div></td>
       <td>${esc(r.email_source || '-')}</td>
-      <td><span class="mono">${esc(short(r.access_token || '', 42))}</span></td>
+      <td><span class="mono" title="${esc(r.access_token || '')}">${esc(short(r.access_token || '', 10))}</span></td>
+      <td>${_planCell(r)}</td>
       <td>${r.totp_secret ? '已启用' : '<span class="muted">未启用</span>'}</td>
       <td>${_codexCell(r)}</td>
       <td class="muted">${esc(r.created_at || '-')}</td>
-      <td class="actions">${cbtn('复制Token', r.access_token, 'primary')} ${cbtn('复制整行', r.copy_line, 'good')} ${_codexAction(r)} <button data-codex-log="${esc(r.email)}" title="查看该账号最近一次 Codex 补跑日志">补跑日志</button> <button class="danger" data-account-delete="${esc(r.id)}" data-email="${esc(r.email)}">删除</button></td>
-    </tr>`).join('') || '<tr><td colspan="9" class="muted">暂无账号</td></tr>';
+      <td class="actions">${cbtn('复制Token', r.access_token, 'primary')} ${cbtn('复制整行', r.copy_line, 'good')} ${_planAction(r)} ${_codexAction(r)} <button data-codex-log="${esc(r.email)}" title="查看该账号最近一次 Codex 补跑日志">补跑日志</button> <button class="danger" data-account-delete="${esc(r.id)}" data-email="${esc(r.email)}">删除</button></td>
+    </tr>`).join('') || '<tr><td colspan="10" class="muted">暂无账号</td></tr>';
   updateAccountSelectionUi(rows);
   _renderPager('accounts', total);
 }
@@ -933,9 +1006,11 @@ function updateAccountSelectionUi(pageRows = null) {
   const hint = $('#accountsSelectedHint');
   const bulkBtn = $('#btnDeleteSelectedAccounts');
   const retryBulkBtn = $('#btnRetrySelectedCodex');
+  const checkPlanBtn = $('#btnCheckSelectedPlans');
   if (hint) hint.textContent = `已选 ${ACCOUNT_SELECTED.size}`;
   if (bulkBtn) bulkBtn.disabled = ACCOUNT_SELECTED.size === 0;
   if (retryBulkBtn) retryBulkBtn.disabled = ACCOUNT_SELECTED.size === 0;
+  if (checkPlanBtn) checkPlanBtn.disabled = ACCOUNT_SELECTED.size === 0;
 
   const cbAll = $('#accountsSelectAll');
   if (!cbAll) return;
@@ -983,6 +1058,12 @@ $('#btnCloseRetryLog').addEventListener('click', closeRetryLogModal);
 
 // 账号操作按钮（事件委托）
 $('#accountsBody').addEventListener('click', async (e) => {
+  const planBtn = e.target.closest('[data-plan-check]');
+  if (planBtn) {
+    await checkOnePlan(Number(planBtn.dataset.planCheck), planBtn);
+    return;
+  }
+
   const delBtn = e.target.closest('[data-account-delete]');
   if (delBtn) {
     await deleteAccount(Number(delBtn.dataset.accountDelete), delBtn.dataset.email, delBtn);
@@ -1054,6 +1135,59 @@ $('#accountsSelectAll').addEventListener('change', (e) => {
 });
 $('#btnDeleteSelectedAccounts').addEventListener('click', deleteSelectedAccounts);
 $('#btnRetrySelectedCodex').addEventListener('click', retrySelectedCodex);
+$('#btnCheckSelectedPlans').addEventListener('click', checkSelectedPlans);
+
+async function checkOnePlan(id, btn) {
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '查询中…';
+  try {
+    const r = await api('/api/accounts/check-plan', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({account_id: id}),
+    });
+    const ret = r.result || {};
+    if (ret.ok) {
+      const trial = ret.plus_trial_eligible ? '，有 Plus 试用资格' : '';
+      showToast(`套餐：${ret.current_plan_type || '-'}${trial}`);
+    } else {
+      showToast('查询失败: ' + (ret.error || 'unknown'));
+    }
+    await loadAccounts();
+  } catch(err) {
+    showToast('查询失败: ' + err.message);
+    btn.disabled = false;
+    btn.textContent = old;
+  }
+}
+
+async function checkSelectedPlans() {
+  const ids = Array.from(ACCOUNT_SELECTED);
+  if (ids.length === 0) { showToast('请先选择账号'); return; }
+  const workersEl = $('#codexBulkWorkers');
+  const workers = Math.max(1, Math.min(16, Number(workersEl?.value || 3)));
+  const btn = $('#btnCheckSelectedPlans');
+  btn.disabled = true;
+  const old = btn.textContent;
+  btn.textContent = '查询中…';
+  try {
+    const r = await api('/api/accounts/check-plan-bulk', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({account_ids: ids, workers}),
+    });
+    const trialCount = (r.checked || []).filter(x => x.plus_trial_eligible).length;
+    const failed = r.failed_count || 0;
+    showToast(`已查询 ${r.checked_count || 0} 个，成功 ${r.ok_count || 0}，Plus试用 ${trialCount}，失败 ${failed}`);
+    await loadAccounts();
+  } catch(err) {
+    showToast('批量查询失败: ' + err.message);
+    updateAccountSelectionUi();
+  } finally {
+    btn.textContent = old;
+  }
+}
 
 async function deleteAccount(id, email, btn) {
   if (!confirm(`确定删除账号 #${id}？\n\n${email || ''}\n\n会从本地账号列表、注册成功邮箱和 token 文件中移除。`)) return;

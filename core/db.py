@@ -659,6 +659,75 @@ def update_account_codex_status(email: str, codex_status: str, codex_error: str 
         return True
 
 
+def update_account_plan_check(acc_id: int | None = None, email: str | None = None, result: dict | None = None) -> bool:
+    """更新账号套餐/Plus 试用资格查询结果。"""
+    result = result or {}
+    with _LOCK:
+        accounts = _load_accounts()
+        target_email = (email or "").lower()
+        row = next((
+            r for r in accounts
+            if (acc_id is not None and int(r.get("id") or 0) == int(acc_id))
+            or (target_email and (r.get("email") or "").lower() == target_email)
+        ), None)
+        if row is None:
+            return False
+
+        ok = bool(result.get("ok"))
+        row["plan_check_ok"] = ok
+        row["plan_checked_at"] = result.get("checked_at") or _now()
+        row["plan_check_http_status"] = result.get("http_status")
+        row["plan_check_error"] = None if ok else result.get("error")
+
+        if result.get("account_id"):
+            row["account_id"] = result.get("account_id")
+        if result.get("current_plan_type"):
+            row["current_plan_type"] = result.get("current_plan_type")
+            row["plan_type"] = result.get("current_plan_type")
+        if result.get("subscription_plan") is not None:
+            row["subscription_plan"] = result.get("subscription_plan")
+        if result.get("has_active_subscription") is not None:
+            row["has_active_subscription"] = bool(result.get("has_active_subscription"))
+        if result.get("expires_at") is not None:
+            row["plan_expires_at"] = result.get("expires_at")
+        if result.get("renews_at") is not None:
+            row["plan_renews_at"] = result.get("renews_at")
+        if result.get("cancels_at") is not None:
+            row["plan_cancels_at"] = result.get("cancels_at")
+        if result.get("billing_period") is not None:
+            row["billing_period"] = result.get("billing_period")
+        if result.get("billing_currency") is not None:
+            row["billing_currency"] = result.get("billing_currency")
+        if result.get("is_delinquent") is not None:
+            row["is_delinquent"] = bool(result.get("is_delinquent"))
+        for _k in (
+            "discount_type",
+            "discount_amount",
+            "discount_duration_num_periods",
+            "discount_expires_at",
+            "discount_cancellation_policy",
+            "discount_promo_campaign_id",
+            "last_purchase_origin_platform",
+            "last_will_renew",
+        ):
+            if result.get(_k) is not None:
+                row[_k] = result.get(_k)
+
+        row["plus_trial_eligible"] = bool(result.get("plus_trial_eligible"))
+        row["plus_trial_campaign_id"] = result.get("plus_trial_campaign_id")
+        row["plus_trial_title"] = result.get("plus_trial_title")
+        row["plus_trial_discount_percentage"] = result.get("plus_trial_discount_percentage")
+        row["plus_trial_duration_num_periods"] = result.get("plus_trial_duration_num_periods")
+        row["plus_trial_duration_period"] = result.get("plus_trial_duration_period")
+        row["eligible_offer_ids"] = result.get("eligible_offer_ids") or []
+        row["token_expired"] = result.get("token_expired")
+        row["token_expires_at"] = result.get("token_expires_at")
+        row["plan_check_result_json"] = json.dumps(result, ensure_ascii=False)
+        row["updated_at"] = _now()
+        _save_accounts(accounts)
+        return True
+
+
 def list_accounts(limit: int = 500, offset: int = 0) -> list[dict]:
     with _LOCK:
         rows = sorted(_load_accounts(), key=lambda x: int(x.get("id") or 0), reverse=True)
