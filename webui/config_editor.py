@@ -112,7 +112,7 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "BROWSER_USE_SESSION_TIMEOUT", "file": "browser_use.py", "type": "int", "group": "Browser Use",
-        "label": "云端会话超时(秒)", "help": "传给 Browser Use connect URL 的 timeout；服务端有上限，程序会自动限制到 60-180，建议 180",
+        "label": "云端keepAlive(分钟)", "help": "传给 Browser Use connect URL 的 timeout/keepAlive；程序会自动限制到 1-240，建议 240",
     },
     {
         "key": "BROWSER_USE_FAST_MODE", "file": "browser_use.py", "type": "bool", "group": "Browser Use",

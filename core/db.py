@@ -322,7 +322,7 @@ def _render_static_viewer(outlook_rows: list[dict] | None = None, account_rows: 
     </div>
     <div class="table-wrap">
       <table>
-        <thead><tr><th>邮箱</th><th>状态</th><th>Token</th><th>已用时间</th><th>操作</th></tr></thead>
+        <thead><tr><th>邮箱</th><th>状态</th><th>Token</th><th>导入时间</th><th>已用时间</th><th>操作</th></tr></thead>
         <tbody id="outlookBody"></tbody>
       </table>
     </div>
@@ -410,6 +410,7 @@ function render() {{
       <td><div class="main-cell">${{esc(r.email)}}</div><div class="sub-cell mono">${{esc(short(r.copy_line, 76))}}</div></td>
       <td>${{pill(r.status)}}</td>
       <td><span class="mono">${{esc(short(r.access_token || '', 36) || '未生成')}}</span></td>
+      <td class="muted">${{esc(r.imported_at || r.created_at || '-')}}</td>
       <td class="muted">${{esc(r.used_at || '-')}}</td>
       <td class="actions">${{btn('复制邮箱', r.copy_line)}} ${{btn('复制Token', r.access_token, 'primary')}} ${{btn('复制整行', r.account_copy_line, 'good')}}</td>
     </tr>`).join('');

@@ -676,7 +676,10 @@ def _fetch_graph_messages(http: CurlSession, token: str) -> list[dict]:
     rows = data.get("value") if isinstance(data, dict) else None
     if not isinstance(rows, list):
         raise OutlookClientError(f"Microsoft Graph 响应缺少 value: {str(data)[:300]}")
-    return [_normalize_ms_message(m) for m in rows if isinstance(m, dict)]
+    out = [_normalize_ms_message(m) for m in rows if isinstance(m, dict)]
+    for item in out:
+        item["_fetch_source"] = "graph"
+    return out
 
 
 def _fetch_outlook_rest_messages(http: CurlSession, token: str) -> list[dict]:
@@ -730,6 +733,7 @@ def _fetch_outlook_rest_messages(http: CurlSession, token: str) -> list[dict]:
         body_obj = m.get("Body") or m.get("body") if isinstance(m.get("Body") or m.get("body"), dict) else {}
         received = m.get("ReceivedDateTime") or m.get("DateTimeReceived") or m.get("receivedDateTime") or ""
         out.append({
+            "_fetch_source": "outlook_rest",
             "id": m.get("Id") or m.get("id") or "",
             "subject": m.get("Subject") or m.get("subject") or "",
             "from": {"emailAddress": {"address": email_addr.get("Address") or email_addr.get("address") or "", "name": email_addr.get("Name") or email_addr.get("name") or ""}},
@@ -783,7 +787,9 @@ def _fetch_imap_direct_messages(account: OutlookAccount) -> list[dict]:
                 if not isinstance(raw, (bytes, bytearray)):
                     continue
                 msg = email_lib.message_from_bytes(raw)
-                out.append(_imap_msg_to_dict(msg))
+                item = _imap_msg_to_dict(msg)
+                item["_fetch_source"] = "imap_new" if token_source == "live_imap_new" else "imap_entra_outlook"
+                out.append(item)
             except Exception as exc:
                 logger.debug("[Outlook] 本地 IMAP 解析邮件失败 mid=%s: %s", mid, exc)
         if token_source == "live_imap_new":
@@ -887,7 +893,11 @@ def _fetch_via(session: CurlSession, protocol: str, account: OutlookAccount) -> 
         return []
 
     emails = data.get("emails") or []
-    logger.debug(f"[Outlook] {protocol} 拿到 {len(emails)} 封邮件")
+    source = f"remote_{protocol}"
+    for item in emails:
+        if isinstance(item, dict):
+            item.setdefault("_fetch_source", source)
+    logger.debug(f"[Outlook] {protocol} 拿到 {len(emails)} 封邮件 source={source}")
     return emails
 
 
@@ -964,31 +974,33 @@ def fetch_latest_otp(
     best_ts: float = 0.0              # 它的邮件时间戳
     best_subject: str = ""
     best_protocol: str = ""
+    best_source: str = ""
     settle_until: float | None = None # 抓到第一封后，等到这个时刻才返回
     last_diag_log = 0.0
 
     while time.time() < deadline:
         # 每轮都重新拉，因为可能有新邮件，也可能旧邮件因延迟才出现
-        all_candidates: list[tuple[str, dict, float]] = []
+        all_candidates: list[tuple[str, dict, float, str]] = []
         for protocol in ("graph", "imap"):
             emails = _fetch_via(session, protocol, account)
             for item in emails:
                 ts = _parse_email_ts(item) or 0.0
-                all_candidates.append((protocol, item, ts))
+                source = str(item.get("_fetch_source") or protocol) if isinstance(item, dict) else protocol
+                all_candidates.append((protocol, item, ts, source))
 
         # 按时间降序，最新的在前
         all_candidates.sort(key=lambda x: x[2], reverse=True)
 
         if all_candidates and not best_otp and time.time() - last_diag_log > 12:
             diag = []
-            for protocol, item, ts in all_candidates[:5]:
+            for protocol, item, ts, source in all_candidates[:5]:
                 subject = str(item.get("subject") or "")[:90]
                 date = item.get("date") or item.get("receivedDateTime") or ""
                 is_openai = looks_like_openai_email(item)
                 after_ok = True if after_ts is None else _is_after(item, after_ts)
                 otp = extract_otp(item)
                 diag.append({
-                    "p": protocol,
+                    "p": source,
                     "date": date,
                     "openai": is_openai,
                     "after": after_ok,
@@ -999,7 +1011,7 @@ def fetch_latest_otp(
             last_diag_log = time.time()
 
         # 找出本轮"最新一封通过过滤的 OpenAI 邮件"
-        for protocol, item, ts in all_candidates:
+        for protocol, item, ts, source in all_candidates:
             if not looks_like_openai_email(item):
                 continue
 
@@ -1020,18 +1032,19 @@ def fetch_latest_otp(
             if ts > best_ts:
                 if best_otp:
                     logger.info(
-                        f"[Outlook] 发现更晚的 OTP={otp} (ts={item.get('date') or item.get('receivedDateTime')}), "
+                        f"[Outlook] 发现更晚的 OTP={otp} (ts={item.get('date') or item.get('receivedDateTime')}, source={source}), "
                         f"替换之前的 {best_otp}, 重置 settle 计时"
                     )
                 else:
                     logger.info(
-                        f"[Outlook] 首次锁定 OTP={otp}, ts={item.get('date') or item.get('receivedDateTime')}, "
+                        f"[Outlook] 首次锁定 OTP={otp}, source={source}, ts={item.get('date') or item.get('receivedDateTime')}, "
                         f"subject={subject!r}, 等 {settle}s 看是否有更晚邮件..."
                     )
                 best_otp = otp
                 best_ts = ts
                 best_subject = subject
                 best_protocol = protocol
+                best_source = source
                 settle_until = time.time() + settle
             break  # 只关心本轮最新那一封
 
@@ -1039,7 +1052,7 @@ def fetch_latest_otp(
         now = time.time()
         if best_otp and settle_until is not None and now >= settle_until:
             logger.info(
-                f"[Outlook] settle 完成，返回 OTP={best_otp}, protocol={best_protocol}, "
+                f"[Outlook] settle 完成，返回 OTP={best_otp}, source={best_source or best_protocol}, protocol={best_protocol}, "
                 f"subject={best_subject!r}"
             )
             return best_otp
@@ -1059,7 +1072,7 @@ def fetch_latest_otp(
     # 超时但已经锁定过候选（settle 没等到结束就到 deadline 了）
     if best_otp:
         logger.warning(
-            f"[Outlook] 总超时但已有候选，返回 OTP={best_otp} (subject={best_subject!r})"
+            f"[Outlook] 总超时但已有候选，返回 OTP={best_otp}, source={best_source or best_protocol} (subject={best_subject!r})"
         )
         return best_otp
 

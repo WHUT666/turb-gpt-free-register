@@ -76,7 +76,7 @@ EMAIL_SOURCE = "outlook,generic_api"
 - 实时查看任务日志。
 - 动态调整注册线程数，提交后新任务立即使用最新值。
 - 批量补跑 Codex，补跑线程数每次提交即时生效。
-- 管理账号、邮箱池、Codex 凭证。
+- 管理账号、邮箱池、Codex 凭证；账号页支持复制全部/选中整行，邮箱池列表展示导入时间、已用时间和状态。
 - 配置页支持热加载，保存后无需重启。
 - Roxy 团队/项目可在配置页获取并保存。
 
@@ -287,6 +287,7 @@ BROWSER_USE_PROXY_COUNTRY_CODE = "jp"   # 可选：us/sg/de...
 BROWSER_USE_USE_PROXY = True
 BROWSER_USE_FAST_MODE = True       # 推荐开启：减少 Browser Use 额外等待
 BROWSER_USE_LOG_TIMING = True      # 输出阶段耗时日志，方便定位慢点
+BROWSER_USE_SESSION_TIMEOUT = 240  # Browser Use keepAlive/timeout，单位分钟；创建远端浏览器时保持活跃更久
 ```
 
 如希望注册成功后也用 Browser Use 自动跑 Codex OAuth：
@@ -308,6 +309,9 @@ pip install playwright
 说明：
 
 - Browser Use 走远端 stealth Chromium，通过 Playwright `connect_over_cdp` 控制。
+- `BROWSER_USE_SESSION_TIMEOUT=240` 会在 Browser Use 创建/连接远端浏览器时设置较长 keepAlive（connect URL 的 `timeout` 参数，单位分钟），避免等待邮箱 OTP、短信或 callback 时云端会话提前回收；代码会限制到 `1~240`。
+- 如果第一次进入邮箱验证码页且邮箱里实际已有验证码，但程序没取到，通常是 Outlook 取件链路抖动：Graph TLS/REST/IMAP 某一轮失败、短轮询切片过短、或 `after_ts` 过滤边界过紧。Browser Use 驱动已放宽 Outlook 单轮取件切片、提前记录验证码过滤时间，并会在等待邮箱 OTP 超时后尝试点击重发继续等待；重发入口使用 DOM 结构/位置/属性启发式定位，不依赖页面文案或 OCR/文字识别。可在「邮箱 / OTP」把 `OTP_MAX_WAIT` 调大到 `180~240`，`OUTLOOK_FETCH_MODE` 优先用 `auto`。
+- Outlook 取件日志会显示验证码来源：`source=graph`、`source=outlook_rest`、`source=imap_new`、`source=imap_entra_outlook`、`source=remote_graph` 或 `source=remote_imap`，便于判断是哪条链路成功取码。
 - `BROWSER_USE_FAST_MODE=True` 会跳过大部分人工节奏等待；`BROWSER_USE_LOG_TIMING=True` 会打印连接、打开页面、邮箱、OTP、手机、callback 等阶段耗时。
 - 支持作为 Codex OAuth 授权驱动：`CODEX_OAUTH_DRIVER="browser_use"`，可完成授权页面、邮箱 OTP、手机短信验证与 callback 捕获。
 - 适合不想安装本机 Roxy、又想要 session 隔离 + 云端代理的场景。

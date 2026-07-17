@@ -49,11 +49,11 @@ class BrowserUseClient:
         if profile_id:
             query["profileId"] = profile_id
 
-        session_timeout = int(getattr(_cfg, "BROWSER_USE_SESSION_TIMEOUT", 180) or 180)
+        session_timeout = int(getattr(_cfg, "BROWSER_USE_SESSION_TIMEOUT", 240) or 240)
         if session_timeout > 0:
-            # Browser Use Cloud 对 connect timeout 有服务端上限；超过会在 CDP 连接阶段返回
-            # HTTP 422 less_than_equal 并断开 websocket。这里统一夹到安全范围。
-            query["timeout"] = str(max(60, min(180, session_timeout)))
+            # Browser Use Cloud connect URL 的 timeout 是 keepAlive/会话存活时间，单位为分钟。
+            # 服务端会校验上限；超过会在 CDP 连接阶段返回 HTTP 422。这里统一夹到 1~240 分钟。
+            query["timeout"] = str(max(1, min(240, session_timeout)))
 
         extra = dict(getattr(_cfg, "BROWSER_USE_EXTRA_QUERY", {}) or {})
         for key, value in extra.items():

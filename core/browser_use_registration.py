@@ -515,17 +515,114 @@ def _click_continue(page) -> None:
 
 
 def _click_resend_otp(page) -> bool:
-    return _click_first(
-        page,
-        [
-            "button:has-text('Resend')",
-            "button:has-text('Send again')",
-            "button:has-text('重新发送')",
-            "a:has-text('Resend')",
-            "button:has-text('没有收到')",
-        ],
-        timeout_ms=5000,
-    )
+    """点击邮箱验证码页的“重发验证码”。
+
+    不使用 Playwright has-text/可见文案匹配，避免不同语言、翻译、OCR/文字识别不稳定。
+    策略：在页面 DOM 中找 OTP 输入框附近的非 submit 按钮/链接，结合位置、type、属性名打分后点击。
+    """
+    try:
+        result = page.evaluate(
+            r"""
+            () => {
+              const visible = (el) => {
+                if (!el) return false;
+                const st = window.getComputedStyle(el);
+                const r = el.getBoundingClientRect();
+                return st && st.visibility !== 'hidden' && st.display !== 'none' && r.width > 1 && r.height > 1;
+              };
+              const disabled = (el) => {
+                return !!(
+                  el.disabled ||
+                  el.getAttribute('aria-disabled') === 'true' ||
+                  el.closest('[aria-disabled="true"]')
+                );
+              };
+              const attrBlob = (el) => [
+                el.id,
+                el.name,
+                el.className,
+                el.getAttribute('data-testid'),
+                el.getAttribute('data-test-id'),
+                el.getAttribute('data-qa'),
+                el.getAttribute('data-action'),
+                el.getAttribute('aria-label'),
+                el.getAttribute('title'),
+                el.getAttribute('href'),
+                el.getAttribute('type'),
+              ].filter(Boolean).join(' ').toLowerCase();
+
+              const otpInputs = Array.from(document.querySelectorAll('input, textarea'))
+                .filter(visible)
+                .filter(el => {
+                  const b = attrBlob(el);
+                  const maxLen = Number(el.getAttribute('maxlength') || '0');
+                  return (
+                    el.autocomplete === 'one-time-code' ||
+                    el.inputMode === 'numeric' ||
+                    /otp|code|verification|verify|token|pin/.test(b) ||
+                    maxLen === 1 || maxLen === 6
+                  );
+                });
+              const inputRects = otpInputs.map(el => el.getBoundingClientRect());
+              const inputBottom = inputRects.length ? Math.max(...inputRects.map(r => r.bottom)) : 0;
+              const inputTop = inputRects.length ? Math.min(...inputRects.map(r => r.top)) : 0;
+              const inputLeft = inputRects.length ? Math.min(...inputRects.map(r => r.left)) : 0;
+              const inputRight = inputRects.length ? Math.max(...inputRects.map(r => r.right)) : window.innerWidth;
+
+              const candidates = Array.from(document.querySelectorAll('button, a, [role="button"], input[type="button"]'))
+                .filter(visible)
+                .filter(el => !disabled(el));
+
+              let best = null;
+              let bestScore = -999;
+              const rows = [];
+              for (const el of candidates) {
+                const r = el.getBoundingClientRect();
+                const b = attrBlob(el);
+                const tag = el.tagName.toLowerCase();
+                const type = String(el.getAttribute('type') || '').toLowerCase();
+                let score = 0;
+
+                // 属性启发，不读 visible innerText，不依赖页面语言文案。
+                if (/resend|send.?again|again|retry|otp|verification|verify|email.?code|code/.test(b)) score += 20;
+                if (/continue|submit|next|primary|login|signup|create|authorize|consent/.test(b)) score -= 8;
+                if (tag === 'a') score += 4;
+                if (tag === 'button' && type && type !== 'submit') score += 6;
+                if (tag === 'button' && type === 'submit') score -= 10;
+
+                // 位置启发：重发入口通常在 OTP 输入框下方或附近；主提交按钮通常更靠下/更大。
+                if (inputRects.length) {
+                  if (r.top >= inputTop - 20 && r.top <= inputBottom + 220) score += 8;
+                  if (r.top > inputBottom - 10) score += 5;
+                  if (r.left >= inputLeft - 160 && r.right <= inputRight + 260) score += 3;
+                  const area = r.width * r.height;
+                  if (area < 18000) score += 2;       // 文本式链接/小按钮优先
+                  if (area > 26000) score -= 4;       // 大的 Continue/Submit 按钮降权
+                } else {
+                  if (r.top > window.innerHeight * 0.25 && r.top < window.innerHeight * 0.85) score += 2;
+                }
+
+                rows.push({tag, type, id: el.id || '', cls: String(el.className || '').slice(0, 80), score, rect: {x:r.x,y:r.y,w:r.width,h:r.height}});
+                if (score > bestScore) {
+                  bestScore = score;
+                  best = el;
+                }
+              }
+
+              if (!best || bestScore < 4) {
+                return {ok:false, reason:'no_candidate', bestScore, candidates: rows.slice(0, 8)};
+              }
+              best.scrollIntoView({block:'center', inline:'center'});
+              best.click();
+              return {ok:true, score:bestScore, tag:best.tagName, id:best.id || '', type:best.getAttribute('type') || '', candidates: rows.slice(0, 8)};
+            }
+            """
+        )
+        logger.info("[BrowserUse][OTP] 非文本重发按钮探测结果：%s", result)
+        return bool(isinstance(result, dict) and result.get("ok"))
+    except Exception as exc:
+        logger.info("[BrowserUse][OTP] 非文本重发按钮探测失败：%s: %s", type(exc).__name__, str(exc)[:160])
+        return False
 
 
 def _wait_after_otp(page, timeout: int = 12) -> str:
@@ -1032,8 +1129,10 @@ def _wait_for_otp_with_browser_heartbeat(page, context, email: str, after_ts: fl
         total_wait, poll_interval, settle = 90, 3, 5
 
     # 单次邮箱轮询不要阻塞太久，否则云端浏览器这段时间没有任何 page activity。
-    slice_wait = max(6, min(12, total_wait))
-    slice_settle = max(0, min(settle, 2))
+    # 但 Outlook direct/Graph 偶发 TLS/网络抖动时，12s 切片太短会导致每轮还没来得及完成
+    # Graph/REST/IMAP 兜底就被上层判超时；这里放宽到最多 30s，仍在每轮之间做页面心跳。
+    slice_wait = max(15, min(30, total_wait))
+    slice_settle = max(0, min(settle, 5))
     deadline = time.time() + total_wait
     last_exc: Exception | None = None
     attempt = 0
@@ -1280,12 +1379,12 @@ def run_browser_use_registration(
             _check_manual_stop()
 
             _t_email = _StepTimer("填写并提交邮箱")
+            # OpenAI 可能在点击提交后立刻发 OTP，甚至邮件 ReceivedDateTime 早于 Playwright
+            # 点击函数返回的本地时间；先记录时间戳，配合 _is_after 的时钟容忍，避免过滤掉首次验证码。
+            otp_after_ts = time.time()
             _type_email(page, email)
             _t_email.done()
             logger.info("[BrowserUse] 已提交邮箱：%s", email)
-            # OpenAI 可能在提交邮箱后立刻发 OTP。必须从这一刻开始算 after_ts；
-            # 不能等密码页/验证码页检测结束后再记录，否则中间几分钟收到的验证码会被过滤掉。
-            otp_after_ts = time.time()
             _assert_not_external_idp(page, "提交邮箱后")
             _check_manual_stop()
 
@@ -1327,7 +1426,21 @@ def run_browser_use_registration(
                         _t_otp_wait.done()
                     except Exception as exc:
                         _t_otp_wait.done(f"failed={type(exc).__name__}: {str(exc)[:160]}")
-                        raise
+                        if otp_attempt >= max_otp_attempts:
+                            raise
+                        logger.warning(
+                            "[BrowserUse][OTP] 本次未收到邮箱验证码，尝试点击重发后继续等待（%s/%s）：%s: %s",
+                            otp_attempt + 1,
+                            max_otp_attempts,
+                            type(exc).__name__,
+                            str(exc)[:180],
+                        )
+                        otp_after_ts = time.time()
+                        resent = _click_resend_otp(page)
+                        logger.info("[BrowserUse][OTP] 重发按钮点击结果：%s", "ok" if resent else "not_found")
+                        _bu_delay("api")
+                        current_otp = None
+                        continue
                 logger.info("[BrowserUse][OTP] 收到验证码：%s", current_otp)
                 _t_otp_submit = _StepTimer("提交邮箱 OTP")
                 _clear_otp_inputs(page)

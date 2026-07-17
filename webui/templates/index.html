@@ -347,6 +347,7 @@
           </label>
           <button class="btn primary" id="btnCheckSelectedPlans" disabled title="查询选中账号当前套餐；free 账号会检查 Plus 试用资格">查询选中套餐</button>
           <button class="btn primary" id="btnRetrySelectedCodex" disabled title="给选中的账号批量补跑 Codex 授权">批量补跑 Codex</button>
+          <button class="btn good" id="btnCopySelectedLines" disabled title="复制选中账号的完整整行，每个账号一行">复制选中整行</button>
           <button class="btn" id="btnDeleteSelectedAccounts" disabled title="删除选中的本地账号/token记录">删除选中</button>
           <button class="btn primary" id="copyAllTokens">复制全部 Token</button>
           <button class="btn good" id="copyAllLines">复制全部整行</button>
@@ -468,10 +469,10 @@
       </div>
       <div class="table-wrap">
         <table class="outlook-table">
-          <colgroup><col class="col-check"><col class="col-email"><col class="col-source"><col class="col-status"><col class="col-token"><col class="col-time"><col class="col-actions"></colgroup>
+          <colgroup><col class="col-check"><col class="col-email"><col class="col-source"><col class="col-status"><col class="col-token"><col class="col-time"><col class="col-time"><col class="col-actions"></colgroup>
           <thead><tr>
             <th><input type="checkbox" id="outlookSelectAll" title="全选/取消全选当前页邮箱"></th>
-            <th>邮箱</th><th>类型</th><th>状态</th><th>Token</th><th>已用时间</th><th>操作</th>
+            <th>邮箱</th><th>类型</th><th>状态</th><th>Token</th><th>导入时间</th><th>已用时间</th><th>操作</th>
           </tr></thead>
           <tbody id="outlookBody"></tbody>
         </table>
@@ -1007,10 +1008,12 @@ function updateAccountSelectionUi(pageRows = null) {
   const bulkBtn = $('#btnDeleteSelectedAccounts');
   const retryBulkBtn = $('#btnRetrySelectedCodex');
   const checkPlanBtn = $('#btnCheckSelectedPlans');
+  const copySelectedBtn = $('#btnCopySelectedLines');
   if (hint) hint.textContent = `已选 ${ACCOUNT_SELECTED.size}`;
   if (bulkBtn) bulkBtn.disabled = ACCOUNT_SELECTED.size === 0;
   if (retryBulkBtn) retryBulkBtn.disabled = ACCOUNT_SELECTED.size === 0;
   if (checkPlanBtn) checkPlanBtn.disabled = ACCOUNT_SELECTED.size === 0;
+  if (copySelectedBtn) copySelectedBtn.disabled = ACCOUNT_SELECTED.size === 0;
 
   const cbAll = $('#accountsSelectAll');
   if (!cbAll) return;
@@ -1134,8 +1137,22 @@ $('#accountsSelectAll').addEventListener('change', (e) => {
   renderAccounts();
 });
 $('#btnDeleteSelectedAccounts').addEventListener('click', deleteSelectedAccounts);
+$('#btnCopySelectedLines').addEventListener('click', copySelectedAccountLines);
 $('#btnRetrySelectedCodex').addEventListener('click', retrySelectedCodex);
 $('#btnCheckSelectedPlans').addEventListener('click', checkSelectedPlans);
+
+
+function copySelectedAccountLines() {
+  const ids = new Set(Array.from(ACCOUNT_SELECTED).map(Number));
+  const lines = ACCOUNTS
+    .filter(r => ids.has(Number(r.id)))
+    .sort((a, b) => Number(a.id || 0) - Number(b.id || 0))
+    .map(r => r.copy_line || '')
+    .filter(Boolean);
+  if (!lines.length) { showToast('请先选择账号'); return; }
+  copyText(lines.join('\n'));
+  showToast(`已复制 ${lines.length} 行`);
+}
 
 async function checkOnePlan(id, btn) {
   btn.disabled = true;
@@ -1297,6 +1314,7 @@ function renderOutlook() {
       <td>${esc(poolLabel(r.source))}</td>
       <td>${pill(r.status)}</td>
       <td><span class="mono">${esc(short(r.access_token || '', 36) || '未生成')}</span></td>
+      <td class="muted">${esc(r.imported_at || r.created_at || '-')}</td>
       <td class="muted">${esc(r.used_at || '-')}</td>
       <td class="actions">
         ${cbtn('复制邮箱', r.copy_line)} ${cbtn('复制Token', r.access_token, 'primary')} ${cbtn('复制整行', r.account_copy_line, 'good')}
@@ -1311,7 +1329,7 @@ function renderOutlook() {
           : ''}
         <button data-pool-act="delete" data-email="${esc(r.email)}" data-source="${esc(r.source || 'outlook')}" style="border-color:#e7a3a0;color:#b3261e;">删除</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="7" class="muted">邮箱池为空</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="8" class="muted">邮箱池为空</td></tr>';
   updateOutlookSelectionUi(rows);
   _renderPager('outlook', total);
 }

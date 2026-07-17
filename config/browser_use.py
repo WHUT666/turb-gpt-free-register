@@ -41,10 +41,10 @@ BROWSER_USE_PROFILE_ID: str = ""
 BROWSER_USE_TIMEOUT: int = 90
 BROWSER_USE_NAVIGATION_TIMEOUT: int = 90
 
-# Browser Use 云端浏览器会话存活时间（秒）。这会作为 connect URL 的 timeout 参数传给 Browser Use。
-# 注意：这不是 Playwright 元素等待超时；用于避免注册快完成、等待 session/accessToken 时云端会话被平台提前回收。
-# Browser Use 当前会校验该字段上限；代码里也会 clamp 到 60~180，避免 HTTP 422。
-BROWSER_USE_SESSION_TIMEOUT: int = 180
+# Browser Use 云端浏览器 keepAlive / 会话存活时间（分钟）。
+# 这会作为 connect URL 的 timeout 参数传给 Browser Use，用于让远端浏览器在等待 OTP、短信、callback 时保持活跃。
+# Browser Use 当前 timeout 单位是分钟，官方上限通常为 240；代码里会 clamp 到 1~240。
+BROWSER_USE_SESSION_TIMEOUT: int = 240
 
 # 快速模式：减少 Browser Use 流程里额外 human_delay 和长等待；默认开启。
 BROWSER_USE_FAST_MODE: bool = True
@@ -55,8 +55,8 @@ BROWSER_USE_LOG_TIMING: bool = True
 # 任务结束后是否主动断开 CDP
 BROWSER_USE_KEEP_BROWSER_OPEN: bool = False
 
-# 额外 CDP query 参数，会合并到 connect URL；会覆盖上面的 BROWSER_USE_SESSION_TIMEOUT。
-# 例：{"timeout": "600"}
+# 额外 CDP query 参数，会合并到 connect URL；同名字段会覆盖上面的 BROWSER_USE_SESSION_TIMEOUT。
+# 例：{"timeout": "120"}  # 单位分钟
 BROWSER_USE_EXTRA_QUERY: dict = {}
 
 # 打开的起始注册页
