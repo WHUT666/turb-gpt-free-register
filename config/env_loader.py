@@ -16,6 +16,10 @@ _PROJECT_ROOT = Path(__file__).resolve().parent.parent
 _ENV_PATH = _PROJECT_ROOT / ".env"
 _LOADED = False
 
+# 这些多行列表字段允许用空值显式覆盖为 []。
+# 例如 WebUI 清空代理池后会写入 PROXY_POOL="" / PROXY_POOL="[]"，不能再回退到源码默认本地代理。
+EXPLICIT_EMPTY_LIST_ENV_KEYS = {"PROXY_POOL"}
+
 # 统一管理：env key -> 说明（.env.example 用）
 SECRET_ENV_KEYS: dict[str, str] = {
     "WEBUI_AUTH_CODE": "WebUI 登录授权码",
@@ -194,7 +198,11 @@ def env_value(key: str, default=None, vtype: str | None = None):
     # `.env.example` 和 WebUI 里常见 `KEY=` / `KEY=""` 这种空配置。
     # 空值表示“未配置，使用 config/*.py 里的默认值”，否则 bool 默认 True
     # 会被空字符串误覆盖成 False，str/list 默认值也会被误清空。
-    if raw is None or str(raw).strip() == "":
+    if raw is None:
+        return default
+    if str(raw).strip() == "":
+        if vtype == "list_str_multiline" and key in EXPLICIT_EMPTY_LIST_ENV_KEYS:
+            return []
         return default
     try:
         return _coerce_env_value(raw, default, vtype)

@@ -27,6 +27,21 @@ class ConfigDefaultFallbackTests(unittest.TestCase):
         finally:
             env_loader._LOADED = old_loaded
 
+    def test_proxy_pool_blank_env_value_means_empty_list(self):
+        old_loaded = env_loader._LOADED
+        env_loader._LOADED = True
+        namespace = {"PROXY_POOL": ["socks5://127.0.0.1:7897"]}
+        try:
+            with patch.dict(os.environ, {"PROXY_POOL": ""}, clear=True):
+                env_loader.apply_env_overrides(namespace, {"PROXY_POOL": "list_str_multiline"})
+        finally:
+            env_loader._LOADED = old_loaded
+
+        self.assertEqual(namespace["PROXY_POOL"], [])
+
+    def test_config_editor_formats_empty_list_as_literal_empty_list(self):
+        self.assertEqual(config_editor._format_env_value([], "list_str_multiline"), "[]")
+
     def test_apply_env_overrides_does_not_let_blank_values_mask_defaults(self):
         old_loaded = env_loader._LOADED
         env_loader._LOADED = True
