@@ -721,6 +721,10 @@ def update_account_plan_check(acc_id: int | None = None, email: str | None = Non
         row["plus_trial_duration_num_periods"] = result.get("plus_trial_duration_num_periods")
         row["plus_trial_duration_period"] = result.get("plus_trial_duration_period")
         row["eligible_offer_ids"] = result.get("eligible_offer_ids") or []
+        row["plan_check_proxy_mode"] = result.get("proxy_mode")
+        row["plan_check_network_route"] = result.get("network_route")
+        row["plan_check_proxy_used"] = result.get("proxy_used")
+        row["plan_check_proxy_fallback_reason"] = result.get("proxy_fallback_reason")
         row["token_expired"] = result.get("token_expired")
         row["token_expires_at"] = result.get("token_expires_at")
         row["plan_check_result_json"] = json.dumps(result, ensure_ascii=False)

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 import base64
+import ipaddress
 import json
 import logging
+import socket
 from datetime import datetime, timezone
 from typing import Any, Optional
-from urllib.parse import quote
+from urllib.parse import quote, urlparse
 
 from core.session import BrowserSession
 
@@ -27,6 +29,110 @@ def normalize_token(token: str) -> str:
     if token.lower().startswith("bearer "):
         token = token[7:].strip()
     return token
+
+
+def _mask_proxy(proxy: str) -> str:
+    """返回可用于日志/API 结果的代理摘要，不泄露用户名和密码。"""
+    value = str(proxy or "").strip()
+    if not value:
+        return ""
+    try:
+        parsed = urlparse(value if "://" in value else f"//{value}")
+        host = parsed.hostname or ""
+        port = f":{parsed.port}" if parsed.port else ""
+        scheme = f"{parsed.scheme}://" if parsed.scheme else ""
+        auth = "***:***@" if parsed.username or parsed.password else ""
+        return f"{scheme}{auth}{host}{port}" or "***"
+    except Exception:
+        return "***"
+
+
+def _local_proxy_status(proxy: str) -> tuple[bool, bool, str | None]:
+    """检查回环代理端口；非本地代理不做预探测，避免额外网络请求。"""
+    value = str(proxy or "").strip()
+    if not value:
+        return False, False, None
+    try:
+        parsed = urlparse(value if "://" in value else f"//{value}")
+        host = parsed.hostname or ""
+        is_loopback = host.lower() == "localhost"
+        if not is_loopback:
+            try:
+                is_loopback = ipaddress.ip_address(host).is_loopback
+            except ValueError:
+                is_loopback = False
+        if not is_loopback:
+            return False, True, None
+        if not parsed.port:
+            return True, False, "本地代理未配置端口"
+        try:
+            with socket.create_connection((host, parsed.port), timeout=0.5):
+                return True, True, None
+        except OSError as exc:
+            return True, False, f"本地代理 {host}:{parsed.port} 未监听（{type(exc).__name__}）"
+    except Exception as exc:
+        return False, False, f"代理地址解析失败（{type(exc).__name__}）"
+
+
+def resolve_plan_check_route(explicit_proxy: Optional[str] = None) -> dict:
+    """解析套餐查询的实际网络路径。
+
+    explicit_proxy 不是 None 时表示 API 调用方明确覆盖配置；空字符串代表直连。
+    """
+    if explicit_proxy is not None:
+        selected = str(explicit_proxy or "").strip()
+        return {
+            "proxy": selected,
+            "proxy_mode": "request",
+            "network_route": "proxy" if selected else "direct",
+            "proxy_used": _mask_proxy(selected) or None,
+            "proxy_fallback_reason": None,
+        }
+
+    from config import proxy as proxy_cfg
+
+    mode = str(getattr(proxy_cfg, "PLAN_CHECK_PROXY_MODE", "auto") or "auto").strip().lower()
+    if mode not in {"auto", "proxy", "direct"}:
+        raise ValueError(f"PLAN_CHECK_PROXY_MODE={mode!r} 无效，可选 auto / proxy / direct")
+    if mode == "direct":
+        return {
+            "proxy": "",
+            "proxy_mode": mode,
+            "network_route": "direct",
+            "proxy_used": None,
+            "proxy_fallback_reason": None,
+        }
+
+    selected = str(getattr(proxy_cfg, "PLAN_CHECK_PROXY", "") or "").strip()
+    if not selected:
+        selected = str(proxy_cfg.pick_proxy() or "").strip()
+    if not selected:
+        if mode == "proxy":
+            raise ValueError("套餐查询网络模式为 proxy，但未配置 PLAN_CHECK_PROXY 或 PROXY_POOL")
+        return {
+            "proxy": "",
+            "proxy_mode": mode,
+            "network_route": "direct",
+            "proxy_used": None,
+            "proxy_fallback_reason": "未配置套餐查询代理或代理池",
+        }
+
+    is_local, available, reason = _local_proxy_status(selected)
+    if mode == "auto" and is_local and not available:
+        return {
+            "proxy": "",
+            "proxy_mode": mode,
+            "network_route": "direct_fallback",
+            "proxy_used": _mask_proxy(selected),
+            "proxy_fallback_reason": reason,
+        }
+    return {
+        "proxy": selected,
+        "proxy_mode": mode,
+        "network_route": "proxy",
+        "proxy_used": _mask_proxy(selected),
+        "proxy_fallback_reason": None,
+    }
 
 
 def decode_jwt_payload_unverified(token: str) -> dict:
@@ -180,8 +286,19 @@ def check_account_plan(token: str, *, proxy: Optional[str] = None, timezone_offs
             **{k: v for k, v in claims.items() if k != "payload"},
         }
 
+    try:
+        route = resolve_plan_check_route(proxy)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "checked_at": now_iso(),
+            "http_status": None,
+            "error": f"套餐查询网络配置错误: {exc}",
+            **{k: v for k, v in claims.items() if k != "payload"},
+        }
+    route_meta = {k: v for k, v in route.items() if k != "proxy"}
     url = f"https://chatgpt.com{ACCOUNTS_CHECK_PATH}?timezone_offset_min={quote(str(timezone_offset_min))}"
-    env = BrowserSession(proxy=proxy)
+    env = BrowserSession(proxy=route["proxy"])
     try:
         resp = env.session.get(url, headers=_common_headers(env, token), allow_redirects=False)
         text = resp.text or ""
@@ -196,6 +313,7 @@ def check_account_plan(token: str, *, proxy: Optional[str] = None, timezone_offs
                 "http_status": resp.status_code,
                 "error": f"HTTP {resp.status_code}",
                 "response_preview": text[:500],
+                **route_meta,
                 **{k: v for k, v in claims.items() if k != "payload"},
             }
         if not isinstance(data, dict):
@@ -205,10 +323,12 @@ def check_account_plan(token: str, *, proxy: Optional[str] = None, timezone_offs
                 "http_status": resp.status_code,
                 "error": "响应不是 JSON 对象",
                 "response_preview": text[:500],
+                **route_meta,
                 **{k: v for k, v in claims.items() if k != "payload"},
             }
         parsed = parse_accounts_check(data, token=token)
         parsed["http_status"] = resp.status_code
+        parsed.update(route_meta)
         return parsed
     except Exception as exc:
         logger.debug("套餐查询失败: %s: %s", type(exc).__name__, exc, exc_info=True)
@@ -217,5 +337,6 @@ def check_account_plan(token: str, *, proxy: Optional[str] = None, timezone_offs
             "checked_at": now_iso(),
             "http_status": None,
             "error": f"{type(exc).__name__}: {exc}",
+            **route_meta,
             **{k: v for k, v in claims.items() if k != "payload"},
         }

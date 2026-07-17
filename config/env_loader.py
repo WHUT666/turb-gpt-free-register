@@ -26,6 +26,7 @@ SECRET_ENV_KEYS: dict[str, str] = {
     "WEBUI_SESSION_SECRET": "WebUI Session Cookie 签名密钥",
     "BROWSER_USE_API_KEY": "Browser Use Cloud API Key",
     "ROXY_API_TOKEN": "RoxyBrowser 本地 API Token",
+    "PLAN_CHECK_PROXY": "套餐查询专用代理（可能包含认证信息）",
     "QQ_IMAP_PASSWORD": "QQ 邮箱 IMAP 授权码（不是 QQ 密码）",
     "GPTMAIL_API_KEY": "GPTMail API Key",
     "MAIL_NEST_API_KEY": "MailNest API Key",

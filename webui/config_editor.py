@@ -338,6 +338,15 @@ EDITABLE_FIELDS = [
         "key": "PROXY_POOL", "file": "proxy.py", "type": "list_str_multiline", "group": "代理池",
         "label": "代理池(每行一个)", "help": "每行一个代理 URL，留空行会被忽略；为空则不使用代理",
     },
+    {
+        "key": "PLAN_CHECK_PROXY_MODE", "file": "proxy.py", "type": "str", "group": "代理池",
+        "label": "套餐查询网络模式", "help": "auto=本地代理可用则走代理、未监听则直连；proxy=强制代理；direct=强制直连",
+    },
+    {
+        "key": "PLAN_CHECK_PROXY", "file": "proxy.py", "type": "str", "group": "代理池",
+        "label": "套餐查询专用代理", "help": "可选；留空时 auto/proxy 从代理池选择。可能包含认证信息，仅保存到 .env",
+        "storage": "env", "secret": True,
+    },
     # ---- 接码平台 ----
     # ---- CPA / Codex 授权 ----
     {

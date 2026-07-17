@@ -75,6 +75,8 @@ from config.openai_protocol import (
 # ---------- 代理池 ----------
 from config.proxy import (
     PROXY_POOL,
+    PLAN_CHECK_PROXY_MODE,
+    PLAN_CHECK_PROXY,
     pick_proxy,
     PROXY,
 )
@@ -193,7 +195,7 @@ __all__ = [
     "OPENAI_CLIENT_ID", "OPENAI_SCOPE", "OPENAI_AUDIENCE", "OPENAI_REDIRECT_URI",
     "SENTINEL_SV", "OPENAI_BUILD_ID",
     # proxy
-    "PROXY_POOL", "pick_proxy", "PROXY",
+    "PROXY_POOL", "PLAN_CHECK_PROXY_MODE", "PLAN_CHECK_PROXY", "pick_proxy", "PROXY",
     # register
     "REGISTER_EMAIL", "REGISTER_PASSWORD", "REGISTER_NAME",
     # email

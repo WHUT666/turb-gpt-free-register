@@ -938,7 +938,11 @@ function _planCell(r) {
   const err = r.plan_check_error || '';
   const plan = (r.current_plan_type || r.plan_type || '-').toString();
   const checked = r.plan_checked_at ? `查询: ${esc(r.plan_checked_at)}` : '未查询实时套餐';
-  const title = err ? esc(err) : checked;
+  const route = (r.plan_check_network_route || '').toString();
+  const routeLabel = route === 'proxy' ? `网络: 代理${r.plan_check_proxy_used ? ` (${r.plan_check_proxy_used})` : ''}` :
+    route === 'direct_fallback' ? `网络: 直连回退${r.plan_check_proxy_fallback_reason ? ` (${r.plan_check_proxy_fallback_reason})` : ''}` :
+    route === 'direct' ? '网络: 直连' : '';
+  const title = [err ? esc(err) : checked, routeLabel].filter(Boolean).join('；');
   if (err && ok === false) return `<span class="pill status-failed" title="${title}">查询失败</span>`;
   const lower = plan.toLowerCase();
 
@@ -1171,7 +1175,8 @@ async function checkOnePlan(id, btn) {
     const ret = r.result || {};
     if (ret.ok) {
       const trial = ret.plus_trial_eligible ? '，有 Plus 试用资格' : '';
-      showToast(`套餐：${ret.current_plan_type || '-'}${trial}`);
+      const route = ret.network_route === 'proxy' ? '代理' : ret.network_route === 'direct_fallback' ? '直连回退' : '直连';
+      showToast(`套餐：${ret.current_plan_type || '-'}${trial}（${route}）`);
     } else {
       showToast('查询失败: ' + (ret.error || 'unknown'));
     }

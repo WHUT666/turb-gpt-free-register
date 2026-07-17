@@ -19,6 +19,17 @@ PROXY_POOL = [
     "socks5://127.0.0.1:7897",
 ]
 
+# 套餐/Plus 试用资格查询使用独立网络策略，避免批量查询被注册代理池中的
+# 临时本地代理拖垮，也避免无条件直连造成出口策略失控。
+#   auto   = 优先使用 PLAN_CHECK_PROXY 或代理池；本地代理端口未监听时回退直连
+#   proxy  = 强制使用 PLAN_CHECK_PROXY 或代理池，失败直接报错
+#   direct = 始终直连
+PLAN_CHECK_PROXY_MODE = "auto"
+
+# 套餐查询专用代理。留空时 auto/proxy 模式从 PROXY_POOL 选择。
+# 代理可能包含账号密码，因此 WebUI 会把它保存到 .env。
+PLAN_CHECK_PROXY = ""
+
 
 def pick_proxy() -> str:
     """从代理池中随机抽取一个代理 URL；池为空时返回空串（即不使用代理）。"""
@@ -29,5 +40,9 @@ def pick_proxy() -> str:
 PROXY = pick_proxy()
 
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'PROXY_POOL': 'list_str_multiline'})
+apply_env_overrides(globals(), {
+    'PROXY_POOL': 'list_str_multiline',
+    'PLAN_CHECK_PROXY_MODE': 'str',
+    'PLAN_CHECK_PROXY': 'str',
+})
 PROXY = pick_proxy()
