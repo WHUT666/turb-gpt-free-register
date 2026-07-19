@@ -355,6 +355,7 @@
           </label>
           <button class="btn primary" id="btnCheckSelectedPlans" disabled title="查询选中账号当前套餐；free 账号会检查 Plus 试用资格">查询选中套餐</button>
           <button class="btn primary" id="btnRetrySelectedCodex" disabled title="给选中的账号批量补跑 Codex 授权">批量补跑 Codex</button>
+          <button class="btn danger" id="btnStopSelectedCodex" disabled title="停止选中账号中正在补跑的 Codex 授权">停止选中补跑</button>
           <button class="btn good" id="btnNoteSelectedAccounts" disabled title="给选中的账号统一设置备注，留空可清空备注">批量备注</button>
           <button class="btn good" id="btnCopySelectedLines" disabled title="复制选中账号的完整整行，每个账号一行">复制选中整行</button>
           <button class="btn" id="btnDeleteSelectedAccounts" disabled title="删除选中的本地账号/token记录">删除选中</button>
@@ -1014,6 +1015,7 @@ function _codexCell(r) {
   const titleAttr = err ? ` title="${esc(err)}"` : '';
   if (s === 'success') return `<span class="pill status-success">成功</span>`;
   if (s === 'retrying') return `<span class="pill status-running">补跑中</span>`;
+  if (s === 'stopped') return `<span class="pill status-used"${titleAttr}>已停止</span>`;
   if (s === 'failed') return `<span class="pill status-failed"${titleAttr}>失败</span>`;
   if (s === 'skipped') return `<span class="pill status-used">已跳过</span>`;
   if (s === 'deactivated') return `<span class="pill status-failed" title="账号已被 OpenAI 删除/停用/封禁，无法授权">已废号</span>`;
@@ -1117,7 +1119,7 @@ function _planAction(r) {
 function _codexAction(r) {
   const s = r.codex_status || '';
   if (s === 'retrying') {
-    return `<button data-codex-reset-retrying="${esc(r.email)}" title="将补跑中状态重置为失败，之后可重新补跑">重置补跑状态</button>`;
+    return `<button class="danger" data-codex-stop="${esc(r.email)}" title="停止该账号正在进行的 Codex 补跑">停止补跑</button> <button data-codex-reset-retrying="${esc(r.email)}" title="只重置状态；不会向运行线程发送停止信号">重置状态</button>`;
   }
   if (s === 'deactivated') return '';
   const label = s === 'success' ? '重新补跑 Codex' : '补跑 Codex';
@@ -1155,12 +1157,14 @@ function updateAccountSelectionUi(pageRows = null) {
   const hint = $('#accountsSelectedHint');
   const bulkBtn = $('#btnDeleteSelectedAccounts');
   const retryBulkBtn = $('#btnRetrySelectedCodex');
+  const stopCodexBulkBtn = $('#btnStopSelectedCodex');
   const checkPlanBtn = $('#btnCheckSelectedPlans');
   const copySelectedBtn = $('#btnCopySelectedLines');
   const noteSelectedBtn = $('#btnNoteSelectedAccounts');
   if (hint) hint.textContent = `已选 ${ACCOUNT_SELECTED.size}`;
   if (bulkBtn) bulkBtn.disabled = ACCOUNT_SELECTED.size === 0;
   if (retryBulkBtn) retryBulkBtn.disabled = ACCOUNT_SELECTED.size === 0;
+  if (stopCodexBulkBtn) stopCodexBulkBtn.disabled = ACCOUNT_SELECTED.size === 0;
   if (checkPlanBtn) checkPlanBtn.disabled = ACCOUNT_SELECTED.size === 0;
   if (copySelectedBtn) copySelectedBtn.disabled = ACCOUNT_SELECTED.size === 0;
   if (noteSelectedBtn) noteSelectedBtn.disabled = ACCOUNT_SELECTED.size === 0;
@@ -1235,6 +1239,23 @@ $('#accountsBody').addEventListener('click', async (e) => {
     return;
   }
 
+  const stopCodexBtn = e.target.closest('[data-codex-stop]');
+  if (stopCodexBtn) {
+    const email = stopCodexBtn.dataset.codexStop;
+    if (!confirm(`确定停止该账号的 Codex 补跑吗？\n\n${email}\n\n会发送停止信号并将状态标记为“已停止”。`)) return;
+    stopCodexBtn.disabled = true;
+    try {
+      const r = await api('/api/codex/stop', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({email}) });
+      showToast(r.message || '已发送停止信号');
+      if (retryLogEmail === email) pollRetryLog();
+      loadAccounts();
+    } catch(err) {
+      showToast('停止失败: ' + err.message);
+      stopCodexBtn.disabled = false;
+    }
+    return;
+  }
+
   const resetBtn = e.target.closest('[data-codex-reset-retrying]');
   if (resetBtn) {
     const email = resetBtn.dataset.codexResetRetrying;
@@ -1296,6 +1317,7 @@ $('#btnDeleteSelectedAccounts').addEventListener('click', deleteSelectedAccounts
 $('#btnCopySelectedLines').addEventListener('click', copySelectedAccountLines);
 $('#btnNoteSelectedAccounts').addEventListener('click', noteSelectedAccounts);
 $('#btnRetrySelectedCodex').addEventListener('click', retrySelectedCodex);
+$('#btnStopSelectedCodex').addEventListener('click', stopSelectedCodex);
 $('#btnCheckSelectedPlans').addEventListener('click', checkSelectedPlans);
 
 
@@ -1433,6 +1455,32 @@ async function noteSelectedAccounts() {
     loadAccounts();
   } catch(err) {
     showToast('批量备注失败: ' + err.message);
+    updateAccountSelectionUi();
+  }
+}
+
+
+async function stopSelectedCodex() {
+  const ids = Array.from(ACCOUNT_SELECTED);
+  if (ids.length === 0) { showToast('请先选择账号'); return; }
+  const selectedAccounts = ids.map(id => ACCOUNTS.find(a => Number(a.id) === Number(id))).filter(Boolean);
+  const retrying = selectedAccounts.filter(a => (a.codex_status || '') === 'retrying');
+  if (retrying.length === 0) { showToast('选中账号里没有正在补跑的 Codex'); return; }
+  if (!confirm(`确定停止选中的 ${retrying.length} 个 Codex 补跑吗？\n\n会发送停止信号，并将状态标记为“已停止”。`)) return;
+  const btn = $('#btnStopSelectedCodex');
+  btn.disabled = true;
+  try {
+    const r = await api('/api/codex/stop-bulk', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({account_ids: retrying.map(a => a.id)}),
+    });
+    const skippedCount = (r.skipped || []).length;
+    showToast(skippedCount ? `已停止 ${r.stopped_count || 0} 个，跳过 ${skippedCount} 个` : `已停止 ${r.stopped_count || 0} 个`);
+    loadAccounts();
+    if (retryLogEmail) pollRetryLog();
+  } catch(err) {
+    showToast('停止选中补跑失败: ' + err.message);
     updateAccountSelectionUi();
   }
 }

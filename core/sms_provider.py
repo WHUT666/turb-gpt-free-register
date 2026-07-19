@@ -289,6 +289,18 @@ def _normalize_h_phone(phone: str) -> str:
     return phone
 
 
+def _h_phone_acquire_mode() -> str:
+    """
+    H 取号模式：
+      - reusable/reuse/prefer_reuse：优先复用，调用 /api/admin/h/take-reusable-phone
+      - new/fresh/always_new：每次取新号，调用 /api/admin/h/take-phone
+    """
+    raw = str(getattr(_cfg, "H_PHONE_ACQUIRE_MODE", "reusable") or "reusable").strip().lower()
+    if raw in ("new", "fresh", "always_new", "take_phone", "take-phone", "每次取新号", "新号"):
+        return "new"
+    return "reusable"
+
+
 # ============================================================
 # 取号
 # ============================================================
@@ -348,7 +360,9 @@ def acquire_number(
                 "projectId": project_id,
                 "country": h_country,
             }
-            data = _post_h_json(http, "/api/admin/h/take-reusable-phone", payload)
+            mode = _h_phone_acquire_mode()
+            api_path = "/api/admin/h/take-phone" if mode == "new" else "/api/admin/h/take-reusable-phone"
+            data = _post_h_json(http, api_path, payload)
             item = data.get("item") or {}
             activation_id = str(item.get("id") or "").strip()
             raw_phone = str(item.get("phone") or "")
@@ -360,10 +374,10 @@ def acquire_number(
                     f"prefix={raw_prefix!r}, normalized=+{phone}"
                 )
             if not activation_id or not phone:
-                raise SmsProviderError(f"H take-reusable-phone 响应缺少 item.id/item.phone：{str(data)[:200]}")
+                raise SmsProviderError(f"H {api_path.rsplit('/', 1)[-1]} 响应缺少 item.id/item.phone：{str(data)[:200]}")
             _ACQUIRED_AT[activation_id] = time.time()
             logger.info(
-                f"[SMS:H] 取号成功：id={activation_id}, phone=+{phone}, "
+                f"[SMS:H] 取号成功：mode={mode}, api={api_path}, id={activation_id}, phone=+{phone}, "
                 f"reused={bool(data.get('reused'))}, duplicate={bool(data.get('duplicate'))}"
             )
             return activation_id, phone

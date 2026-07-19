@@ -776,6 +776,64 @@ def create_app(auth_code: str | None = None) -> Flask:
         """执行一个账号的 Codex 补跑。调用前必须已经 reserve。"""
         codex_retry_service.run_worker(email, batch_label=batch_label, clear_log=clear_log)
 
+
+    @app.post("/api/codex/stop")
+    def api_codex_stop():
+        """停止单个 Codex 补跑。Body {email}。"""
+        data = request.get_json(silent=True) or {}
+        email = (data.get("email") or "").strip()
+        if not email:
+            return jsonify({"ok": False, "error": "email 为空"}), 400
+        acc = db.get_account_by_email(email)
+        if acc is None:
+            return jsonify({"ok": False, "error": f"账号不存在: {email}"}), 404
+        result = codex_retry_service.request_stop(email)
+        status = int(result.pop("status", 200) or 200)
+        return jsonify(result), status
+
+    @app.post("/api/codex/stop-bulk")
+    def api_codex_stop_bulk():
+        """批量停止 Codex 补跑。Body {emails:[...]} 或 {account_ids:[...]}。"""
+        data = request.get_json(silent=True) or {}
+        emails = data.get("emails") or []
+        ids = data.get("account_ids") or data.get("ids") or []
+        targets = []
+        if isinstance(emails, list) and emails:
+            targets = [str(x or "").strip() for x in emails]
+        elif isinstance(ids, list) and ids:
+            for raw in ids:
+                try:
+                    acc = db.get_account(int(raw))
+                except Exception:
+                    acc = None
+                if acc and acc.get("email"):
+                    targets.append(str(acc.get("email") or "").strip())
+        else:
+            return jsonify({"ok": False, "error": "emails 或 account_ids 必须是非空数组"}), 400
+        if len(targets) > 500:
+            return jsonify({"ok": False, "error": "单次最多停止 500 个"}), 400
+        stopped = []
+        skipped = []
+        seen = set()
+        for email in targets:
+            key = email.lower()
+            if not email or key in seen:
+                continue
+            seen.add(key)
+            acc = db.get_account_by_email(email)
+            if acc is None:
+                skipped.append({"email": email, "reason": "账号不存在"})
+                continue
+            if (acc.get("codex_status") or "") != "retrying" and not codex_retry_service.is_retrying(email):
+                skipped.append({"email": email, "reason": "未处于补跑中"})
+                continue
+            r = codex_retry_service.request_stop(email)
+            if r.get("ok"):
+                stopped.append({"email": email, "injected": r.get("injected"), "running": r.get("running")})
+            else:
+                skipped.append({"email": email, "reason": r.get("error") or "停止失败"})
+        return jsonify({"ok": True, "stopped": stopped, "stopped_count": len(stopped), "skipped": skipped})
+
     @app.post("/api/codex/reset-retrying")
     def api_codex_reset_retrying():
         """手动重置某账号的 Codex 补跑中状态。Body {email, status?}。"""

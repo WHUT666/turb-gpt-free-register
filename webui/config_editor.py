@@ -485,6 +485,10 @@ EDITABLE_FIELDS = [
         "label": "H 号码前缀", "help": "H 返回号码不含国家码时填写，例如美国 10 位本地号填 1；留空则不补",
     },
     {
+        "key": "H_PHONE_ACQUIRE_MODE", "file": "codex.py", "type": "str", "group": "接码平台",
+        "label": "H 取号方式", "help": "reusable=优先复用历史可用号码；new=每次都取一个新号码",
+    },
+    {
         "key": "L_API_BASE", "file": "codex.py", "type": "str", "group": "接码平台",
         "label": "L API 地址", "help": "L 取号服务基础地址，例如 http://localhost:8788",
     },

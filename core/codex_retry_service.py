@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Codex 授权补跑服务，供账号页和注册任务队列共同使用。"""
+import ctypes
 import logging
 import threading
 from pathlib import Path
@@ -11,6 +12,13 @@ logger = logging.getLogger(__name__)
 _LOG_DIR = Path(__file__).resolve().parent.parent / "注册日志"
 _RETRYING: set[str] = set()
 _RETRYING_LOCK = threading.Lock()
+_STOP_REQUESTED: set[str] = set()
+_RUNNING_THREADS: dict[str, int] = {}
+
+
+class CodexRetryStopped(Exception):
+    """用户手动停止 Codex 补跑。"""
+
 
 
 def log_path(email: str) -> Path:
@@ -26,18 +34,74 @@ def reserve(email: str) -> bool:
     with _RETRYING_LOCK:
         if key in _RETRYING:
             return False
+        _STOP_REQUESTED.discard(key)
+        _RUNNING_THREADS.pop(key, None)
         _RETRYING.add(key)
         return True
 
 
 def release(email: str) -> None:
+    key = (email or "").strip().lower()
     with _RETRYING_LOCK:
-        _RETRYING.discard((email or "").strip().lower())
+        _RETRYING.discard(key)
+        _RUNNING_THREADS.pop(key, None)
 
 
 def is_retrying(email: str) -> bool:
     with _RETRYING_LOCK:
         return (email or "").strip().lower() in _RETRYING
+
+
+def is_stop_requested(email: str) -> bool:
+    with _RETRYING_LOCK:
+        return (email or "").strip().lower() in _STOP_REQUESTED
+
+
+def check_stop_requested(email: str) -> None:
+    if is_stop_requested(email):
+        raise CodexRetryStopped("用户手动停止 Codex 补跑")
+
+
+def _async_raise(thread_id: int, exc_type: type[BaseException]) -> bool:
+    """向指定 Python 线程注入异常，用于尽快中断阻塞中的补跑流程。"""
+    if not thread_id:
+        return False
+    res = ctypes.pythonapi.PyThreadState_SetAsyncExc(
+        ctypes.c_long(thread_id),
+        ctypes.py_object(exc_type),
+    )
+    if res == 0:
+        return False
+    if res != 1:
+        ctypes.pythonapi.PyThreadState_SetAsyncExc(ctypes.c_long(thread_id), None)
+        return False
+    return True
+
+
+def request_stop(email: str) -> dict:
+    """请求停止单个 Codex 补跑。运行中会注入停止异常；排队中会在启动前退出。"""
+    key = (email or "").strip().lower()
+    if not key:
+        return {"ok": False, "error": "email 为空", "status": 400}
+    with _RETRYING_LOCK:
+        retrying = key in _RETRYING
+        thread_id = _RUNNING_THREADS.get(key)
+        _STOP_REQUESTED.add(key)
+    if not retrying:
+        db.update_account_codex_status(email, "stopped", "用户手动停止（未发现运行中的补跑）")
+        return {"ok": True, "message": "未发现运行中的补跑，已标记为已停止", "state": "stopped", "running": False}
+
+    injected = bool(thread_id and _async_raise(int(thread_id), CodexRetryStopped))
+    db.update_account_codex_status(email, "stopped", "用户手动停止 Codex 补跑")
+    try:
+        p = log_path(email)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        from datetime import datetime as _dt
+        with p.open("a", encoding="utf-8") as f:
+            f.write(f"{_dt.now().strftime('%H:%M:%S')} [WARNING] [Codex 补跑] 用户手动停止，已发送停止信号 injected={injected}\n")
+    except Exception:
+        logger.exception("写入 Codex 停止日志失败")
+    return {"ok": True, "message": "已发送停止信号", "state": "stopped", "running": True, "injected": injected}
 
 
 def run_worker(
@@ -51,7 +115,12 @@ def run_worker(
     fh: logging.FileHandler | None = None
     root_logger = logging.getLogger()
     result: dict = {"status": "failed", "ok": False, "message": "Codex 补跑未返回结果"}
+    key = (email or "").strip().lower()
     try:
+        with _RETRYING_LOCK:
+            _RUNNING_THREADS[key] = threading.get_ident()
+        check_stop_requested(email)
+
         from core.codex_oauth import run_codex_oauth
 
         path = Path(target_log_path) if target_log_path else log_path(email)
@@ -87,7 +156,9 @@ def run_worker(
             logger.info("[Codex 补跑] 批量任务：%s", batch_label)
         logger.info("[Codex 补跑] 开始：%s", email)
         logger.info("[Codex 补跑] 阶段说明：获取授权地址 → 登录邮箱 → 邮箱 OTP → 手机验证 → 捕获 callback → 提交/保存凭证")
+        check_stop_requested(email)
         result = run_codex_oauth(email, force=True)
+        check_stop_requested(email)
         logger.info(
             "[Codex 补跑] 结果：status=%s ok=%s file=%s callback=%s",
             result.get("status"), result.get("ok"), result.get("file_path"), result.get("callback_url"),
@@ -103,7 +174,17 @@ def run_worker(
             db.update_account_codex_status(email, result_status, result.get("message"))
             logger.warning("[Codex 补跑] %s 失败: %s", email, result.get("message"))
         return result
+    except CodexRetryStopped as exc:
+        result = {"status": "stopped", "ok": False, "message": str(exc) or "用户手动停止 Codex 补跑"}
+        db.update_account_codex_status(email, "stopped", result["message"])
+        logger.warning("[Codex 补跑] %s 已停止: %s", email, result["message"])
+        return result
     except Exception as exc:
+        if is_stop_requested(email):
+            result = {"status": "stopped", "ok": False, "message": "用户手动停止 Codex 补跑"}
+            db.update_account_codex_status(email, "stopped", result["message"])
+            logger.warning("[Codex 补跑] %s 已停止", email)
+            return result
         result = {"status": "failed", "ok": False, "message": f"{type(exc).__name__}: {exc}"}
         db.update_account_codex_status(email, "failed", result["message"])
         logger.exception("[Codex 补跑] %s 异常", email)
@@ -117,3 +198,6 @@ def run_worker(
                 fh.close()
         finally:
             release(email)
+            with _RETRYING_LOCK:
+                if key:
+                    _STOP_REQUESTED.discard(key)

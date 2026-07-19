@@ -346,8 +346,8 @@ def _run_codex_retry_job(job_id: int, log_file: str, email: str, account_id: int
             target_log_path=log_file,
         )
         now_iso = datetime.now().isoformat(timespec="seconds")
-        if is_stop_requested(job_id):
-            db.update_job(job_id, status="stopped", email=email, account_id=account_id, error="用户手动停止", completed_at=now_iso)
+        if is_stop_requested(job_id) or result.get("status") == "stopped":
+            db.update_job(job_id, status="stopped", email=email, account_id=account_id, error=str(result.get("message") or "用户手动停止")[:500], completed_at=now_iso)
         elif result.get("ok"):
             db.update_job(
                 job_id,

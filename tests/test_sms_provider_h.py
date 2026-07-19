@@ -38,11 +38,12 @@ class HSmsProviderTests(unittest.TestCase):
         self.assertIn("H_ADMIN_AUTH_CODE", env_loader.SECRET_ENV_KEYS)
         fields = {f["key"]: f for f in config_editor.EDITABLE_FIELDS}
         self.assertIn("H_API_BASE", fields)
+        self.assertIn("H_PHONE_ACQUIRE_MODE", fields)
         self.assertTrue(fields["H_ADMIN_AUTH_CODE"].get("secret"))
 
     def test_acquire_number_uses_h_take_reusable_phone(self):
         http = _Http([{"item": {"id": "hid-1", "phone": "2025550123"}, "reused": True, "duplicate": False}])
-        with patch.object(codex_config, "SMS_PROVIDER", "h"), patch.object(codex_config, "H_API_BASE", "http://localhost:8788"), patch.object(codex_config, "H_ADMIN_AUTH_CODE", "adm"), patch.object(codex_config, "SMS_SERVICE", "12345"), patch.object(codex_config, "SMS_COUNTRY", "us"), patch.object(codex_config, "H_PHONE_PREFIX", "1"):
+        with patch.object(codex_config, "SMS_PROVIDER", "h"), patch.object(codex_config, "H_API_BASE", "http://localhost:8788"), patch.object(codex_config, "H_ADMIN_AUTH_CODE", "adm"), patch.object(codex_config, "SMS_SERVICE", "12345"), patch.object(codex_config, "SMS_COUNTRY", "us"), patch.object(codex_config, "H_PHONE_PREFIX", "1"), patch.object(codex_config, "H_PHONE_ACQUIRE_MODE", "reusable"):
             activation_id, phone = sms_provider.acquire_number(http=http)
 
         self.assertEqual(activation_id, "hid-1")
@@ -51,6 +52,17 @@ class HSmsProviderTests(unittest.TestCase):
         self.assertIn('"projectId": "12345"', http.calls[0]["data"])
         self.assertIn('"country": "us"', http.calls[0]["data"])
         self.assertEqual(http.calls[0]["headers"]["Authorization"], "Bearer adm")
+
+    def test_acquire_number_uses_h_take_phone_when_mode_new(self):
+        http = _Http([{"item": {"id": "hid-2", "phone": "2025550456"}, "reused": False, "duplicate": False}])
+        with patch.object(codex_config, "SMS_PROVIDER", "h"), patch.object(codex_config, "H_API_BASE", "http://localhost:8788"), patch.object(codex_config, "H_ADMIN_AUTH_CODE", "adm"), patch.object(codex_config, "SMS_SERVICE", "12345"), patch.object(codex_config, "SMS_COUNTRY", "us"), patch.object(codex_config, "H_PHONE_PREFIX", "1"), patch.object(codex_config, "H_PHONE_ACQUIRE_MODE", "new"):
+            activation_id, phone = sms_provider.acquire_number(http=http)
+
+        self.assertEqual(activation_id, "hid-2")
+        self.assertEqual(phone, "12025550456")
+        self.assertTrue(http.calls[0]["url"].endswith("/api/admin/h/take-phone"))
+        self.assertIn('"projectId": "12345"', http.calls[0]["data"])
+        self.assertIn('"country": "us"', http.calls[0]["data"])
 
     def test_wait_for_sms_code_uses_h_fetch_code(self):
         http = _Http([{"item": {"id": "hid-1", "status": "code_received"}, "code": "123456"}])
