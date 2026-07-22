@@ -12,6 +12,33 @@ import string
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
 
+
+def _configure_stdio_utf8() -> None:
+    """避免 Windows 默认 cp1252 控制台打印中文帮助/日志时 UnicodeEncodeError。"""
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    os.environ.setdefault("PYTHONUTF8", "1")
+    for stream_name in ("stdout", "stderr"):
+        stream = getattr(sys, stream_name, None)
+        if stream is None:
+            continue
+        try:
+            stream.reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            try:
+                import io
+                wrapped = io.TextIOWrapper(
+                    stream.buffer,
+                    encoding="utf-8",
+                    errors="replace",
+                    line_buffering=True,
+                )
+                setattr(sys, stream_name, wrapped)
+            except Exception:
+                pass
+
+
+_configure_stdio_utf8()
+
 # PyInstaller frozen：工作目录切到 exe 旁，确保同目录 .env / 输出文件生效
 try:
     from config.runtime_paths import data_root, is_frozen
