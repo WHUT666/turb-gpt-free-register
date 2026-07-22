@@ -108,15 +108,26 @@ jobs:
           test -f dist/README.txt
           test -f dist/.env.example
 
-      - name: Smoke run --help
+      - name: Smoke run --help (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Get-ChildItem dist | Format-Table Name, Length
+          if (-not (Test-Path .\dist\turb-gpt-register.exe)) {
+            throw "missing dist/turb-gpt-register.exe"
+          }
+          & .\dist\turb-gpt-register.exe --help
+          if ($LASTEXITCODE -ne 0) { throw "exe --help exit $LASTEXITCODE" }
+
+      - name: Smoke run --help (Unix)
+        if: runner.os != 'Windows'
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ runner.os }}" == "Windows" ]]; then
-            ./dist/turb-gpt-register.exe --help
-          else
-            ./dist/turb-gpt-register --help
-          fi
+          ls -la dist/
+          test -f dist/turb-gpt-register
+          chmod +x dist/turb-gpt-register
+          ./dist/turb-gpt-register --help
 
       - name: Package artifact folder
         shell: bash
@@ -127,6 +138,7 @@ jobs:
             cp dist/turb-gpt-register.exe "artifact/${{ matrix.artifact }}/"
           else
             cp dist/turb-gpt-register "artifact/${{ matrix.artifact }}/"
+            chmod +x "artifact/${{ matrix.artifact }}/turb-gpt-register"
           fi
           cp dist/README.txt dist/.env.example "artifact/${{ matrix.artifact }}/"
           # 方便用户直接改代理；不包含真实密钥
