@@ -22,6 +22,7 @@ class OutlookTwConfigTests(unittest.TestCase):
         self.assertIn("OUTLOOK_TW_DOMAIN_INDEX", keys)
         field = next(item for item in EDITABLE_FIELDS if item["key"] == "EMAIL_SOURCE")
         self.assertIn("outlook_tw", field["help"])
+        self.assertIn("yahoos", field["help"])
 
 
 class CodexAgentIdentityConfigTests(unittest.TestCase):

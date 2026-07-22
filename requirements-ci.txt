@@ -1,0 +1,10 @@
+# CI / unit tests — 不装浏览器全家桶，保证三端安装快且稳定
+curl_cffi>=0.15.0
+pyotp>=2.9.0
+flask>=3.0.0
+requests>=2.31.0
+pycryptodome>=3.23.0
+cryptography>=41
+python-dotenv>=1.0.0
+faker>=24.0.0
+PyNaCl>=1.5.0
