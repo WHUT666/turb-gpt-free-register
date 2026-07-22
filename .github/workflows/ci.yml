@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
     branches: [main]
   workflow_dispatch:
@@ -10,6 +11,9 @@ on:
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
+
+permissions:
+  contents: write
 
 jobs:
   test:
@@ -119,7 +123,6 @@ jobs:
           if (-not (Test-Path .\dist\turb-gpt-register.exe)) {
             throw "missing dist/turb-gpt-register.exe"
           }
-          # CI runner 默认控制台代码页常为 cp1252，强制 UTF-8 后再跑 --help
           chcp 65001 | Out-Null
           $OutputEncoding = [Console]::OutputEncoding = [System.Text.UTF8Encoding]::new()
           & .\dist\turb-gpt-register.exe --help
@@ -147,13 +150,80 @@ jobs:
             chmod +x "artifact/${{ matrix.artifact }}/turb-gpt-register"
           fi
           cp dist/README.txt dist/.env.example "artifact/${{ matrix.artifact }}/"
-          # 方便用户直接改代理；不包含真实密钥
           cp dist/.env.example "artifact/${{ matrix.artifact }}/.env"
+          # Release 用 zip，方便下载（全平台用 Python，避免 Windows 缺 zip）
+          python - <<'PY'
+          import pathlib, zipfile
+          name = "${{ matrix.artifact }}"
+          root = pathlib.Path("artifact") / name
+          zpath = pathlib.Path("artifact") / f"{name}.zip"
+          with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as zf:
+              for p in root.rglob("*"):
+                  if p.is_file():
+                      zf.write(p, p.relative_to(root.parent).as_posix())
+          print("wrote", zpath, "bytes", zpath.stat().st_size)
+          PY
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
-          path: artifact/${{ matrix.artifact }}/
+          path: |
+            artifact/${{ matrix.artifact }}/
+            artifact/${{ matrix.artifact }}.zip
           if-no-files-found: error
           retention-days: 14
+
+  release:
+    name: GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download all build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+
+      - name: Collect zip assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p upload
+          find release-assets -type f -name '*.zip' -print -exec cp {} upload/ \;
+          ls -lah upload
+          test -f upload/turb-gpt-register-windows.zip
+          test -f upload/turb-gpt-register-linux.zip
+          test -f upload/turb-gpt-register-macos.zip
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## turb-gpt-register ${{ github.ref_name }}
+
+            跨平台 CLI 注册工具（默认 `EMAIL_SOURCE=yahoos`，同目录 `.env` 配置代理）。
+
+            ### 下载
+            - **Windows**: `turb-gpt-register-windows.zip`
+            - **Linux**: `turb-gpt-register-linux.zip`
+            - **macOS**: `turb-gpt-register-macos.zip`
+
+            ### 使用
+            1. 解压后编辑同目录 `.env`（`PROXY_POOL=socks5://127.0.0.1:7897` 等）
+            2. 本机需安装 Node.js（Sentinel）
+            3. 运行：
+               - Windows: `turb-gpt-register.exe -n 1 --verbose`
+               - Linux/macOS: `./turb-gpt-register -n 1 --verbose`
+
+            CI Artifacts 也会保留约 14 天，可在 Actions 页面下载。
+          files: |
+            upload/turb-gpt-register-windows.zip
+            upload/turb-gpt-register-linux.zip
+            upload/turb-gpt-register-macos.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
