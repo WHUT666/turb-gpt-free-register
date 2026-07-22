@@ -22,7 +22,8 @@ USE_EMAIL_SERVICE = False
 #   "gptmail"           — GPTMail 临时邮箱 API（运行时随机生成邮箱并自动收码）
 #   "mailnest"          — MailNest/迈巢临时邮箱 API（运行时购买邮箱并自动收码）
 #   "cloudmail"         — CloudMail/Cloud Mail API（自动从平台获取域名并随机生成邮箱）
-EMAIL_SOURCE = "outlook,generic_api,mailnest"
+#   "outlook_tw"        — https://outlook.tw 匿名临时邮箱（无需 API Key）
+EMAIL_SOURCE = "yahoos"
 
 
 # ============================================================
@@ -147,5 +148,31 @@ CLOUDMAIL_AUTO_ADD_USER = True
 # 随机邮箱 local-part 长度。
 CLOUDMAIL_RANDOM_LOCAL_LENGTH = 12
 
+
+# ============================================================
+# outlook.tw 匿名临时邮箱：https://outlook.tw/
+# EMAIL_SOURCE=outlook_tw 时，用 faker 英文名 + 4 位数字调用 /api/create 创建邮箱
+# ============================================================
+
+# API 根地址；默认官方站点，可换成自建同款前端服务。
+OUTLOOK_TW_API_BASE = "https://outlook.tw"
+
+# （兼容旧配置）随机用户名长度；当前 faker 自定义创建不再使用此值。
+OUTLOOK_TW_NAME_LENGTH = 8
+
+# 域名下标：对应 GET /api/domains 返回数组的索引，默认 0 = outlook.tw。
+OUTLOOK_TW_DOMAIN_INDEX = 0
+
+# ============================================================
+# yahoos.nl 临时邮箱：https://yahoos.nl/
+# EMAIL_SOURCE=yahoos 时，用 faker 英文名 + 4 位数字 set_email 创建邮箱
+# ============================================================
+
+# API 根地址；默认官方站点。
+YAHOOS_API_BASE = "https://yahoos.nl"
+
+# 邮箱域名；默认 yahoos.nl。
+YAHOOS_DOMAIN = "yahoos.nl"
+
 # ---- .env overrides for WebUI editable fields ----
-apply_env_overrides(globals(), {'USE_EMAIL_SERVICE': 'bool', 'OTP_MAX_WAIT': 'int', 'OTP_POLL_INTERVAL': 'int', 'EMAIL_SOURCE': 'str', 'EMAIL_DOMAIN': 'str', 'QQ_EMAIL': 'str', 'QQ_IMAP_PASSWORD': 'str', 'GPTMAIL_API_KEY': 'str', 'OUTLOOK_FETCH_MODE': 'str', 'MAIL_NEST_API_KEY': 'str', 'MAIL_NEST_PROJECT_CODE': 'str', 'CLOUDFLARE_API_BASE': 'str', 'CLOUDFLARE_API_KEY': 'str', 'CLOUDFLARE_AUTH_MODE': 'str', 'CLOUDFLARE_CUSTOM_AUTH': 'str', 'CLOUDFLARE_PATH_DOMAINS': 'str', 'CLOUDFLARE_PATH_ACCOUNTS': 'str', 'CLOUDFLARE_PATH_TOKEN': 'str', 'CLOUDFLARE_PATH_MESSAGES': 'str', 'CLOUDFLARE_DEFAULT_DOMAINS': 'list_str_multiline', 'CLOUDFLARE_REQUEST_TIMEOUT': 'int', 'CLOUDFLARE_NAME_LENGTH': 'int', 'CLOUDMAIL_API_BASE': 'str', 'CLOUDMAIL_ADMIN_EMAIL': 'str', 'CLOUDMAIL_PASSWORD': 'str', 'CLOUDMAIL_TOKEN_PATH': 'str', 'CLOUDMAIL_AUTH_TOKEN': 'str', 'CLOUDMAIL_DOMAINS': 'list_str_multiline', 'CLOUDMAIL_AUTO_ADD_USER': 'bool', 'CLOUDMAIL_RANDOM_LOCAL_LENGTH': 'int'})
+apply_env_overrides(globals(), {'USE_EMAIL_SERVICE': 'bool', 'OTP_MAX_WAIT': 'int', 'OTP_POLL_INTERVAL': 'int', 'EMAIL_SOURCE': 'str', 'EMAIL_DOMAIN': 'str', 'QQ_EMAIL': 'str', 'QQ_IMAP_PASSWORD': 'str', 'GPTMAIL_API_KEY': 'str', 'OUTLOOK_FETCH_MODE': 'str', 'MAIL_NEST_API_KEY': 'str', 'MAIL_NEST_PROJECT_CODE': 'str', 'CLOUDFLARE_API_BASE': 'str', 'CLOUDFLARE_API_KEY': 'str', 'CLOUDFLARE_AUTH_MODE': 'str', 'CLOUDFLARE_CUSTOM_AUTH': 'str', 'CLOUDFLARE_PATH_DOMAINS': 'str', 'CLOUDFLARE_PATH_ACCOUNTS': 'str', 'CLOUDFLARE_PATH_TOKEN': 'str', 'CLOUDFLARE_PATH_MESSAGES': 'str', 'CLOUDFLARE_DEFAULT_DOMAINS': 'list_str_multiline', 'CLOUDFLARE_REQUEST_TIMEOUT': 'int', 'CLOUDFLARE_NAME_LENGTH': 'int', 'CLOUDMAIL_API_BASE': 'str', 'CLOUDMAIL_ADMIN_EMAIL': 'str', 'CLOUDMAIL_PASSWORD': 'str', 'CLOUDMAIL_TOKEN_PATH': 'str', 'CLOUDMAIL_AUTH_TOKEN': 'str', 'CLOUDMAIL_DOMAINS': 'list_str_multiline', 'CLOUDMAIL_AUTO_ADD_USER': 'bool', 'CLOUDMAIL_RANDOM_LOCAL_LENGTH': 'int', 'OUTLOOK_TW_API_BASE': 'str', 'OUTLOOK_TW_NAME_LENGTH': 'int', 'OUTLOOK_TW_DOMAIN_INDEX': 'int', 'YAHOOS_API_BASE': 'str', 'YAHOOS_DOMAIN': 'str'})

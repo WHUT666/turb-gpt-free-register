@@ -14,8 +14,10 @@ import os
 import re
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_CONFIG_DIR = _PROJECT_ROOT / "config"
+from config.runtime_paths import data_root, resource_root
+
+_PROJECT_ROOT = data_root()
+_CONFIG_DIR = resource_root() / "config"
 EXPLICIT_EMPTY_LIST_KEYS = {"PROXY_POOL"}
 
 
@@ -44,6 +46,10 @@ EDITABLE_FIELDS = [
     {
         "key": "ENABLE_CODEX_AUTO", "file": "codex.py", "type": "bool", "group": "功能开关",
         "label": "启用 Codex OAuth", "help": "注册成功后自动跑 Codex 授权（全新session+接码），落盘 codex-邮箱.json",
+    },
+    {
+        "key": "ENABLE_CODEX_AGENT_IDENTITY", "file": "codex.py", "type": "bool", "group": "功能开关",
+        "label": "启用 Codex Agent Identity", "help": "注册成功拿到 accessToken 后，调用 codex_agent 生成 agent_identity 的 auth.json（无需接码）",
     },
     {
         "key": "REGISTRATION_DRIVER", "file": "roxybrowser.py", "type": "str", "group": "注册方式",
@@ -293,7 +299,7 @@ EDITABLE_FIELDS = [
     },
     {
         "key": "EMAIL_SOURCE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
-        "label": "邮箱来源", "help": "可填单个或多个，逗号分隔并按顺序兜底：outlook,generic_api,cloudflare_domain,cloudflare,gptmail,mailnest,cloudmail",
+        "label": "邮箱来源", "help": "可填单个或多个，逗号分隔并按顺序兜底：outlook,generic_api,cloudflare_domain,cloudflare,gptmail,mailnest,cloudmail,outlook_tw,yahoos",
     },
     {
         "key": "GPTMAIL_API_KEY", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
@@ -407,6 +413,26 @@ EDITABLE_FIELDS = [
     {
         "key": "CLOUDMAIL_RANDOM_LOCAL_LENGTH", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
         "label": "CloudMail随机名前缀长度", "help": "生成邮箱 local-part 的长度，建议 10-16",
+    },
+    {
+        "key": "OUTLOOK_TW_API_BASE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "outlook.tw API 地址", "help": "默认 https://outlook.tw；EMAIL_SOURCE=outlook_tw 时用 faker 英文名+4位数字创建邮箱，无需 API Key",
+    },
+    {
+        "key": "OUTLOOK_TW_NAME_LENGTH", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
+        "label": "outlook.tw 用户名长度", "help": "兼容旧配置；当前 faker 自定义创建不再使用此值",
+    },
+    {
+        "key": "OUTLOOK_TW_DOMAIN_INDEX", "file": "email.py", "type": "int", "group": "邮箱 / OTP",
+        "label": "outlook.tw 域名下标", "help": "对应 /api/domains 返回数组索引，默认 0",
+    },
+    {
+        "key": "YAHOOS_API_BASE", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "yahoos.nl API 地址", "help": "默认 https://yahoos.nl；EMAIL_SOURCE=yahoos 时用 faker 英文名+4位数字创建邮箱，无需 API Key",
+    },
+    {
+        "key": "YAHOOS_DOMAIN", "file": "email.py", "type": "str", "group": "邮箱 / OTP",
+        "label": "yahoos.nl 邮箱域名", "help": "默认 yahoos.nl",
     },
     # ---- 浏览器地区画像 ----
     {

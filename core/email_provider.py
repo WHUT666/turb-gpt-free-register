@@ -10,15 +10,26 @@ EMAIL_SOURCE 支持单个或多个来源：
     "gptmail"
     "mailnest"
     "cloudmail"
-    "outlook,generic_api,mailnest,cloudmail"          # 按顺序兜底
-    ["outlook", "generic_api", "mailnest", "cloudmail"]  # 也兼容列表写法
+    "outlook_tw"          # https://outlook.tw 匿名临时邮箱
+    "outlook,generic_api,mailnest,cloudmail,outlook_tw"  # 按顺序兜底
+    ["outlook", "generic_api", "mailnest", "cloudmail", "outlook_tw"]  # 也兼容列表写法
 """
 import logging
 from typing import Iterable
 
 logger = logging.getLogger(__name__)
 
-_VALID_SOURCES = ("outlook", "generic_api", "cloudflare_domain", "cloudflare", "gptmail", "mailnest", "cloudmail")
+_VALID_SOURCES = (
+    "outlook",
+    "generic_api",
+    "cloudflare_domain",
+    "cloudflare",
+    "gptmail",
+    "mailnest",
+    "cloudmail",
+    "outlook_tw",
+    "yahoos",
+)
 
 
 def parse_email_sources(value=None) -> list[str]:
@@ -65,6 +76,16 @@ def _pick_from_source(source: str) -> str:
     if source == "cloudmail":
         from core.cloudmail_client import pick_account
         return pick_account().email
+    if source == "outlook_tw":
+        from core.outlook_tw_client import pick_account
+        return pick_account().email
+    if source == "yahoos":
+        from core.yahoos_client import pick_account
+        from config import register as _reg
+        fixed = str(getattr(_reg, "REGISTER_EMAIL", "") or "").strip()
+        if fixed.lower().endswith("@yahoos.nl"):
+            return pick_account(fixed).email
+        return pick_account().email
     from core.outlook_client import pick_account
     return pick_account().email
 
@@ -99,6 +120,14 @@ def resolve_email_source(email: str) -> str:
     from core.cloudmail_client import get_account_context as get_cloudmail_context
     if get_cloudmail_context(email):
         return "cloudmail"
+    from core.outlook_tw_client import get_account_context as get_outlook_tw_context
+    if get_outlook_tw_context(email):
+        return "outlook_tw"
+    from core.yahoos_client import get_account_context as get_yahoos_context
+    if get_yahoos_context(email):
+        return "yahoos"
+    if str(email or "").lower().endswith("@yahoos.nl"):
+        return "yahoos"
 
     from core import db
     if db.get_generic_api_email_by_email(email):
@@ -175,6 +204,12 @@ def wait_for_otp(
     if source == "cloudmail":
         from core.cloudmail_client import fetch_latest_otp
         return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
+    if source == "outlook_tw":
+        from core.outlook_tw_client import fetch_latest_otp
+        return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
+    if source == "yahoos":
+        from core.yahoos_client import fetch_latest_otp
+        return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
     from core.outlook_client import fetch_latest_otp
     return fetch_latest_otp(email, after_ts=after_ts, **extra_kwargs)
 
@@ -199,6 +234,12 @@ def release_email(email: str, status: str = "available", note: str | None = None
         release_account(email, status=status, note=note)
     elif source == "cloudmail":
         from core.cloudmail_client import release_account
+        release_account(email, status=status, note=note)
+    elif source == "outlook_tw":
+        from core.outlook_tw_client import release_account
+        release_account(email, status=status, note=note)
+    elif source == "yahoos":
+        from core.yahoos_client import release_account
         release_account(email, status=status, note=note)
     else:
         from core.outlook_client import release_account

@@ -50,7 +50,9 @@ from curl_cffi import requests as curl_requests
 
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from config.runtime_paths import data_root
+
+_PROJECT_ROOT = data_root()
 
 # 跟重定向链时的最大跳数，防死循环
 _MAX_REDIRECTS = 15

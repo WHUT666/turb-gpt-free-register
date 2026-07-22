@@ -43,12 +43,13 @@ from config import (
     OPENAI_BUILD_ID,
 )
 
+from config.runtime_paths import data_root, resource_root
+
 logger = logging.getLogger(__name__)
 
-# 项目根目录（core 的上一级）
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-# Node 资源放在项目根的 sentinel/ 子目录下
-_SENTINEL_DIR = _PROJECT_ROOT / "sentinel"
+# 打包后：sentinel JS 在资源目录；账号数据在 exe 旁数据目录
+_PROJECT_ROOT = data_root()
+_SENTINEL_DIR = resource_root() / "sentinel"
 _RUNNER_PATH = _SENTINEL_DIR / "sentinel-runner.js"
 _SDK_PATH = _SENTINEL_DIR / "sdk.js"
 
@@ -228,7 +229,7 @@ def generate_sentinel_token(
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
-                cwd=str(_PROJECT_ROOT),
+                cwd=str(_SENTINEL_DIR),
                 timeout=_RUNNER_TIMEOUT,
                 env=env,
             )

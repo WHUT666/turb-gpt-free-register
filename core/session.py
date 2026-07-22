@@ -74,7 +74,12 @@ class BrowserSession:
         self.react_resources_key = "__reactResources$" + self.react_container_key.split("$", 1)[1]
 
         # 创建 curl_cffi 会话
-        self.session = Session(impersonate=IMPERSONATE)
+        # 本地 MITM 代理（Clash/Surge 等）常导致 curl CA 校验失败；可用 SSL_VERIFY=False 关闭。
+        import os
+        verify = str(os.getenv("SSL_VERIFY", "true") or "true").strip().lower() not in (
+            "0", "false", "no", "off",
+        )
+        self.session = Session(impersonate=IMPERSONATE, verify=verify)
 
         # 设置代理
         if self.proxy:

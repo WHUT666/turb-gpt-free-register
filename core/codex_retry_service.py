@@ -7,10 +7,11 @@ import time
 from pathlib import Path
 
 from core import db
+from config.runtime_paths import data_root
 
 logger = logging.getLogger(__name__)
 
-_LOG_DIR = Path(__file__).resolve().parent.parent / "注册日志"
+_LOG_DIR = data_root() / "注册日志"
 _RETRYING: set[str] = set()
 _RETRYING_LOCK = threading.Lock()
 _STOP_REQUESTED: set[str] = set()

@@ -21,10 +21,12 @@ import pyotp
 from core.session import BrowserSession
 from core.humanize import delay as human_delay
 
+from config.runtime_paths import data_root
+
 logger = logging.getLogger(__name__)
 
 # 输出目录（与项目根 .claude/ 工作区分离，单独放在 accounts/）
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = data_root()
 _ACCOUNTS_DIR = _PROJECT_ROOT / "accounts"
 _BATCH_ARCHIVE_LOCK = threading.RLock()
 
@@ -431,6 +433,33 @@ def save_account_data(
     )
     logger.info(f"[Save] 账号已写入 DB, id={row_id}, email={email}")
     logger.info(f"[Save] 批次归档目录: {batch_folder}")
+
+    # 可选：用 accessToken 生成 Codex Agent Identity（不依赖 OAuth/接码）
+    try:
+        from config import codex as _codex_cfg
+
+        if bool(getattr(_codex_cfg, "ENABLE_CODEX_AGENT_IDENTITY", False)):
+            import codex_agent
+
+            out_dir = _PROJECT_ROOT / getattr(_codex_cfg, "CODEX_OUTPUT_DIRNAME", "codex_accounts")
+            out_dir.mkdir(parents=True, exist_ok=True)
+            safe_email = (email or "unknown").strip().replace("/", "_").replace("\\", "_")
+            agent_path = out_dir / f"codex-agent-{safe_email}.json"
+            codex_agent.create_codex_agent_identity(
+                access_token=access_token,
+                output_path=str(agent_path),
+                verify_task=True,
+                proxy=proxy_used,
+            )
+            logger.info("[Save][CodexAgent] 已生成 agent_identity: %s", agent_path)
+    except Exception as exc:
+        logger.warning(
+            "[Save][CodexAgent] 生成 agent_identity 失败（不影响注册结果）: %s, %s: %s",
+            email,
+            type(exc).__name__,
+            str(exc)[:180],
+        )
+
     # session 中的 account.planType 不能说明 Plus 试用资格。账号落库后只负责
     # 入队，由专用线程池异步查询并回写，避免占用注册工作线程。
     try:

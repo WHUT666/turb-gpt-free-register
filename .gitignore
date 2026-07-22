@@ -81,3 +81,16 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Hotmail 素材池（含 refresh_token，禁止提交）
+hotmail.com_*.txt
+
+# PyInstaller 产物
+dist/
+build/pyinstaller/
+*.exe
+
+# M365 本地证书/私钥
+tools/m365*/server.key
+tools/m365*/server.cert
+tools/m365*/**/__pycache__/

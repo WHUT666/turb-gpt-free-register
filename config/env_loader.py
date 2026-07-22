@@ -12,8 +12,8 @@ import os
 import re
 from pathlib import Path
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
-_ENV_PATH = _PROJECT_ROOT / ".env"
+from config.runtime_paths import data_root
+
 _LOADED = False
 
 # 这些多行列表字段允许用空值显式覆盖为 []。
@@ -44,7 +44,8 @@ SECRET_ENV_KEYS: dict[str, str] = {
 
 
 def env_path() -> Path:
-    return _ENV_PATH
+    # frozen 时允许用户把 .env 放在 exe 旁；每次取最新 data_root
+    return data_root() / ".env"
 
 
 def load_env(*, override: bool = False) -> Path:
@@ -53,23 +54,24 @@ def load_env(*, override: bool = False) -> Path:
     优先使用 python-dotenv；未安装时使用本文件内置的轻量 parser，避免配置读取强依赖。
     """
     global _LOADED
+    path = env_path()
     try:
         from dotenv import load_dotenv
     except ImportError:  # pragma: no cover
-        if _ENV_PATH.exists():
+        if path.exists():
             for key, value in read_env_file().items():
                 if override or key not in os.environ:
                     os.environ[key] = value
         _LOADED = True
-        return _ENV_PATH
+        return path
 
-    if _ENV_PATH.exists():
-        load_dotenv(dotenv_path=_ENV_PATH, override=override)
+    if path.exists():
+        load_dotenv(dotenv_path=path, override=override)
     else:
         # 仍然允许系统环境变量生效
         load_dotenv(override=override)
     _LOADED = True
-    return _ENV_PATH
+    return path
 
 
 def ensure_loaded() -> None:
@@ -99,10 +101,11 @@ def _escape_env_value(value: str) -> str:
 
 def read_env_file() -> dict[str, str]:
     """解析 .env 文件为 dict（不依赖 os.environ）。"""
-    if not _ENV_PATH.exists():
+    path = env_path()
+    if not path.exists():
         return {}
     out: dict[str, str] = {}
-    for raw in _ENV_PATH.read_text(encoding="utf-8").splitlines():
+    for raw in path.read_text(encoding="utf-8").splitlines():
         line = raw.strip()
         if not line or line.startswith("#"):
             continue
@@ -127,9 +130,10 @@ def write_env_values(updates: dict[str, str]) -> list[str]:
     if not updates:
         return []
 
+    path = env_path()
     existing_lines: list[str] = []
-    if _ENV_PATH.exists():
-        existing_lines = _ENV_PATH.read_text(encoding="utf-8").splitlines()
+    if path.exists():
+        existing_lines = path.read_text(encoding="utf-8").splitlines()
 
     remaining = {str(k): ("" if v is None else str(v)) for k, v in updates.items()}
     written: list[str] = []
@@ -157,9 +161,10 @@ def write_env_values(updates: dict[str, str]) -> list[str]:
             written.append(key)
 
     text = "\n".join(out_lines).rstrip() + "\n"
-    tmp = _ENV_PATH.with_suffix(".env.tmp")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(".env.tmp")
     tmp.write_text(text, encoding="utf-8")
-    tmp.replace(_ENV_PATH)
+    tmp.replace(path)
 
     # 让当前进程立刻看到新值
     load_env(override=True)

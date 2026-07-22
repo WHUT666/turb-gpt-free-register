@@ -6,10 +6,19 @@ ChatGPT 协议注册全流程入口
 import sys
 import argparse
 import logging
+import os
 import random
 import string
 import time
 from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait
+
+# PyInstaller frozen：工作目录切到 exe 旁，确保同目录 .env / 输出文件生效
+try:
+    from config.runtime_paths import data_root, is_frozen
+    if is_frozen():
+        os.chdir(str(data_root()))
+except Exception:
+    pass
 
 from config import REGISTER_EMAIL, REGISTER_NAME  # 这两个一般不在 WebUI 改
 # 可热改的，按模块属性方式读

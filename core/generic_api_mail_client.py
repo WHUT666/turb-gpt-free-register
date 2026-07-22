@@ -20,12 +20,14 @@ import requests
 from config import email as _email_cfg
 from core.otp_utils import extract_otp
 
+from config.runtime_paths import data_root
+
 logger = logging.getLogger(__name__)
 
 _CODE_REGEX = re.compile(r"\b(\d{6})\b")
 _CONTEXT_WORDS = ("code", "verify", "verification", "验证码", "代码", "确认码", "認証", "コード")
 _CONTEXT_CACHE: dict[str, "GenericApiEmailAccount"] = {}
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = data_root()
 _ACCOUNTS_FILE = _PROJECT_ROOT / "用于注册的API邮箱.txt"
 
 

@@ -21,9 +21,11 @@ from pathlib import Path
 from config import email as _email_cfg
 from core.otp_utils import looks_like_openai_email, extract_otp
 
+from config.runtime_paths import data_root
+
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = data_root()
 
 
 class QQMailClientError(RuntimeError):

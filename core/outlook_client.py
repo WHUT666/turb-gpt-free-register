@@ -48,9 +48,11 @@ from config import (
 from config import email as _email_cfg
 from core.otp_utils import looks_like_openai_email, extract_otp
 
+from config.runtime_paths import data_root
+
 logger = logging.getLogger(__name__)
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+_PROJECT_ROOT = data_root()
 
 # 邮箱 → account 上下文的内存缓存，fetch_latest_otp 用
 _CONTEXT_CACHE: dict[str, "OutlookAccount"] = {}
@@ -75,8 +77,15 @@ class OutlookClientError(RuntimeError):
     """Outlook 邮箱服务相关异常。"""
 
 
+def _ssl_verify() -> bool:
+    import os
+    return str(os.getenv("SSL_VERIFY", "true") or "true").strip().lower() not in (
+        "0", "false", "no", "off",
+    )
+
+
 def _http_session() -> CurlSession:
-    s = CurlSession(impersonate=IMPERSONATE)
+    s = CurlSession(impersonate=IMPERSONATE, verify=_ssl_verify())
     s.headers.update({
         "User-Agent": USER_AGENT,
         "Origin": OUTLOOK_API_BASE.rstrip("/"),
@@ -352,7 +361,7 @@ def _is_remote_disabled_error(exc: Exception | str) -> bool:
 
 
 def _ms_http() -> CurlSession:
-    s = CurlSession(impersonate=IMPERSONATE)
+    s = CurlSession(impersonate=IMPERSONATE, verify=_ssl_verify())
     s.headers.update({
         "User-Agent": USER_AGENT,
         "Accept": "application/json",

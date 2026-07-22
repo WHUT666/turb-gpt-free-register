@@ -18,7 +18,9 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-_PROJECT_ROOT = Path(__file__).resolve().parent.parent
+from config.runtime_paths import data_root
+
+_PROJECT_ROOT = data_root()
 _DATA_DIR = _PROJECT_ROOT
 _LEGACY_DATA_DIR = _PROJECT_ROOT / "data"
 _LOG_DIR = _PROJECT_ROOT / "注册日志"
